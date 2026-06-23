@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-23
+
+### Added
+
+- `index` shows a scan spinner and a hashing progress bar (with percentage and
+  ETA) on a terminal. Suppressed when piped or under `--debug`.
+
+### Performance
+
+- `index` writes are batched into transactions instead of one autocommit per
+  file, with `synchronous=NORMAL` and `busy_timeout=5000` pragmas, cutting fsync
+  overhead on the bulk build while staying resumable.
+
 ## [0.2.0] - 2026-06-22
 
 ### Added
@@ -22,5 +35,6 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/danhorst/photo-import/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/danhorst/photo-import/compare/v0.1.0...v0.2.0
