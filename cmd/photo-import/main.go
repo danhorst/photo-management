@@ -21,6 +21,8 @@ import (
 	"github.com/dbh/photo-import/internal/index"
 	"github.com/dbh/photo-import/internal/media"
 	"github.com/dbh/photo-import/internal/organize"
+	"github.com/mattn/go-isatty"
+	"github.com/schollz/progressbar/v3"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
@@ -272,6 +274,14 @@ type job struct {
 
 func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
 	logf := debugLogger(debug)
+	// A live bar conflicts with --debug's per-file logging, and only makes sense
+	// on a terminal.
+	showProgress := !debug && isatty.IsTerminal(os.Stderr.Fd())
+
+	var scanBar *progressbar.ProgressBar
+	if showProgress {
+		scanBar = progressbar.Default(-1, "scanning")
+	}
 
 	var jobs []job
 	var cached int
@@ -289,6 +299,9 @@ func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
 		if p == cfg.Database || !media.IsMedia(d.Name()) {
 			return nil
 		}
+		if scanBar != nil {
+			scanBar.Add(1)
+		}
 		info, err := d.Info()
 		if err != nil {
 			return nil
@@ -301,6 +314,10 @@ func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
 		jobs = append(jobs, job{p, size, mtime})
 		return nil
 	})
+	if scanBar != nil {
+		scanBar.Finish()
+		fmt.Fprintln(os.Stderr)
+	}
 	if walkErr != nil {
 		return walkErr
 	}
@@ -332,8 +349,16 @@ func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
 		close(resCh)
 	}()
 
+	var hashBar *progressbar.ProgressBar
+	if showProgress && len(jobs) > 0 {
+		hashBar = progressbar.Default(int64(len(jobs)), "indexing")
+	}
+
 	var hashed, failed int
 	for r := range resCh {
+		if hashBar != nil {
+			hashBar.Add(1)
+		}
 		if r.err != nil {
 			failed++
 			logf("hash %s: %v", r.job.path, r.err)
@@ -344,6 +369,10 @@ func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
 		}
 		hashed++
 		logf("indexed %s", r.job.path)
+	}
+	if hashBar != nil {
+		hashBar.Finish()
+		fmt.Fprintln(os.Stderr)
 	}
 
 	total, _, err := idx.Stats()
