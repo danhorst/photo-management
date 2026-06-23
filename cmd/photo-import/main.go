@@ -354,6 +354,17 @@ func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
 		hashBar = progressbar.Default(int64(len(jobs)), "indexing")
 	}
 
+	batch, err := idx.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			batch.Rollback()
+		}
+	}()
+
 	var hashed, failed int
 	for r := range resCh {
 		if hashBar != nil {
@@ -364,12 +375,16 @@ func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
 			logf("hash %s: %v", r.job.path, r.err)
 			continue
 		}
-		if err := idx.Put(r.job.path, r.job.size, r.job.mtime, r.hash); err != nil {
+		if err := batch.Put(r.job.path, r.job.size, r.job.mtime, r.hash); err != nil {
 			return err
 		}
 		hashed++
 		logf("indexed %s", r.job.path)
 	}
+	if err := batch.Commit(); err != nil {
+		return err
+	}
+	committed = true
 	if hashBar != nil {
 		hashBar.Finish()
 		fmt.Fprintln(os.Stderr)
