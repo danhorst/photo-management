@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-27
+
+### Added
+
+- Re-importing a memory card that still holds already-imported files now skips
+  them by size and modification time without re-hashing, making repeat imports of
+  an un-wiped card near-instant. Each card is identified by a `.photo-import.toml`
+  marker stamped at its volume root and tracked in a `media_files` table.
+- `import` shows a per-file progress bar on a terminal and reports elapsed time
+  in its summary.
+
+### Performance
+
+- `import` reads capture dates from a long-running `exiftool -stay_open` daemon
+  instead of one batched call, avoiding repeated process startup.
+
 ## [0.3.0] - 2026-06-23
 
 ### Added
@@ -35,6 +51,7 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/danhorst/photo-import/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/danhorst/photo-import/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/danhorst/photo-import/compare/v0.1.0...v0.2.0
