@@ -63,3 +63,45 @@ func TestCachedDetectsChange(t *testing.T) {
 		t.Error("Cached should miss when size changes")
 	}
 }
+
+func TestVolumeMedia(t *testing.T) {
+	idx := open(t)
+	if err := idx.PutMedia("vol1", "DCIM/x.raf", 10, 100); err != nil {
+		t.Fatal(err)
+	}
+	// Same relative path on a different card must not bleed into vol1's set.
+	if err := idx.PutMedia("vol2", "DCIM/x.raf", 99, 999); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := idx.VolumeMedia("vol1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 1 {
+		t.Fatalf("len(VolumeMedia) = %d, want 1", len(m))
+	}
+	if rec, ok := m["DCIM/x.raf"]; !ok || rec.Size != 10 || rec.Mtime != 100 {
+		t.Errorf("record = %+v, %v; want {10 100}, true", rec, ok)
+	}
+}
+
+func TestPutMediaUpsert(t *testing.T) {
+	idx := open(t)
+	if err := idx.PutMedia("vol1", "x.raf", 10, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.PutMedia("vol1", "x.raf", 20, 200); err != nil {
+		t.Fatal(err)
+	}
+	m, err := idx.VolumeMedia("vol1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 1 {
+		t.Errorf("len = %d, want 1 (upsert, not insert)", len(m))
+	}
+	if rec := m["x.raf"]; rec.Size != 20 || rec.Mtime != 200 {
+		t.Errorf("after upsert = %+v; want {20 200}", rec)
+	}
+}

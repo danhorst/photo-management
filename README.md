@@ -34,6 +34,8 @@ The library uses referenced images, so a per-folder sync is fast and sidesteps C
 Files move when the source is on the same volume as the library, and copy otherwise.
 Files without a readable capture date go to `Unsorted/`.
 
+Re-importing a card that still holds already-imported files is near-instant: each card is stamped with a `.photo-import.toml` marker at its root, and files already pulled from it are skipped by size and modification time without re-reading their contents.
+
 ## Commands
 
 - `photo-import <source>` — import from a directory. Flags: `--dry-run`, `--debug`.

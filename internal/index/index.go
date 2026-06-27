@@ -18,12 +18,25 @@ CREATE TABLE IF NOT EXISTS files (
 	hashed_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_files_blake3 ON files(blake3);
+
+CREATE TABLE IF NOT EXISTS media_files (
+	volume_id TEXT NOT NULL,
+	path      TEXT NOT NULL,
+	size      INTEGER NOT NULL,
+	mtime     INTEGER NOT NULL,
+	PRIMARY KEY (volume_id, path)
+);
 `
 
 const insertSQL = `INSERT INTO files(path, size, mtime, blake3, hashed_at) VALUES(?, ?, ?, ?, ?)
 	ON CONFLICT(path) DO UPDATE SET
 	  size=excluded.size, mtime=excluded.mtime,
 	  blake3=excluded.blake3, hashed_at=excluded.hashed_at`
+
+const putMediaSQL = `INSERT INTO media_files(volume_id, path, size, mtime)
+	VALUES(?, ?, ?, ?)
+	ON CONFLICT(volume_id, path) DO UPDATE SET
+	  size=excluded.size, mtime=excluded.mtime`
 
 // batchSize bounds how many rows accumulate per transaction during a bulk
 // index build, so an interrupted run keeps already-committed batches.
@@ -89,6 +102,40 @@ func (i *Index) Cached(path string, size, mtime int64) (hash string, ok bool) {
 // for the handful of writes during an import; use Begin for bulk indexing.
 func (i *Index) Put(path string, size, mtime int64, hash string) error {
 	_, err := i.db.Exec(insertSQL, path, size, mtime, hash, time.Now().Unix())
+	return err
+}
+
+// MediaRecord holds the size and mtime recorded for a file on a volume, enough
+// to decide whether a re-import can skip re-hashing it.
+type MediaRecord struct {
+	Size  int64
+	Mtime int64
+}
+
+// VolumeMedia returns every recorded file for volumeID keyed by relative path,
+// so an import can test membership in memory rather than querying per file.
+func (i *Index) VolumeMedia(volumeID string) (map[string]MediaRecord, error) {
+	rows, err := i.db.Query(`SELECT path, size, mtime FROM media_files WHERE volume_id = ?`, volumeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]MediaRecord{}
+	for rows.Next() {
+		var path string
+		var r MediaRecord
+		if err := rows.Scan(&path, &r.Size, &r.Mtime); err != nil {
+			return nil, err
+		}
+		out[path] = r
+	}
+	return out, rows.Err()
+}
+
+// PutMedia records that relpath on volume volumeID was processed at the given
+// size and mtime, so a later import can skip re-hashing it.
+func (i *Index) PutMedia(volumeID, relpath string, size, mtime int64) error {
+	_, err := i.db.Exec(putMediaSQL, volumeID, relpath, size, mtime)
 	return err
 }
 

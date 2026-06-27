@@ -21,6 +21,7 @@ import (
 	"github.com/dbh/photo-import/internal/index"
 	"github.com/dbh/photo-import/internal/media"
 	"github.com/dbh/photo-import/internal/organize"
+	"github.com/dbh/photo-import/internal/volume"
 	"github.com/mattn/go-isatty"
 	"github.com/schollz/progressbar/v3"
 )
@@ -120,6 +121,7 @@ func cmdImport(args []string) error {
 		os.Exit(2)
 	}
 	source := positionals[0]
+	start := time.Now()
 
 	cfg, err := config.Load(*lib, *db)
 	if err != nil {
@@ -132,6 +134,7 @@ func cmdImport(args []string) error {
 	defer idx.Close()
 
 	logf := debugLogger(*debug)
+	showProgress := !*debug && isatty.IsTerminal(os.Stderr.Fd())
 
 	paths, err := collectMedia(source)
 	if err != nil {
@@ -139,18 +142,52 @@ func cmdImport(args []string) error {
 	}
 	logf("found %d media file(s) under %s", len(paths), source)
 
-	dates, err := exif.Dates(paths)
+	root, volID, marker, existed, err := volume.Resolve(source)
 	if err != nil {
-		return fmt.Errorf("reading dates: %w", err)
+		return fmt.Errorf("identifying volume: %w", err)
+	}
+	if !existed && !*dryRun {
+		if err := volume.Stamp(root, marker); err != nil {
+			return fmt.Errorf("stamping volume: %w", err)
+		}
+	}
+	logf("volume %s at %s", volID, root)
+
+	seen, err := idx.VolumeMedia(volID)
+	if err != nil {
+		return err
 	}
 
-	var imported, dups, unsorted int
+	daemon, err := exif.NewDaemon()
+	if err != nil {
+		return fmt.Errorf("starting exiftool: %w", err)
+	}
+	defer daemon.Close()
+
+	var importBar *progressbar.ProgressBar
+	if showProgress && len(paths) > 0 {
+		importBar = progressbar.Default(int64(len(paths)), "importing")
+	}
+
+	var imported, dups, skipped, unsorted int
 	touched := map[string]bool{}
 
 	for _, src := range paths {
+		if importBar != nil {
+			importBar.Add(1)
+		}
 		fi, err := os.Stat(src)
 		if err != nil {
 			logf("skip %s: %v", src, err)
+			continue
+		}
+		rel, err := filepath.Rel(root, src)
+		if err != nil {
+			rel = src
+		}
+		if rec, ok := seen[rel]; ok && rec.Size == fi.Size() && rec.Mtime == fi.ModTime().Unix() {
+			skipped++
+			logf("seen %s (already processed from this card)", src)
 			continue
 		}
 		h, err := hash.File(src)
@@ -164,10 +201,15 @@ func cmdImport(args []string) error {
 		} else if found {
 			dups++
 			logf("dup  %s == %s", src, existing)
+			if !*dryRun {
+				if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 
-		t, dated := dates[src]
+		t, dated := daemon.Date(src)
 		if !dated {
 			t = fi.ModTime()
 		}
@@ -187,8 +229,13 @@ func cmdImport(args []string) error {
 		if isDup {
 			dups++
 			logf("dup  %s already in library as %s", src, dst)
-			if err := idx.Put(dst, fi.Size(), fi.ModTime().Unix(), h); err != nil {
-				return err
+			if !*dryRun {
+				if err := idx.Put(dst, fi.Size(), fi.ModTime().Unix(), h); err != nil {
+					return err
+				}
+				if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -201,6 +248,9 @@ func cmdImport(args []string) error {
 				return fmt.Errorf("placing %s: %w", src, err)
 			}
 			if err := idx.Put(dst, fi.Size(), fi.ModTime().Unix(), h); err != nil {
+				return err
+			}
+			if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
 				return err
 			}
 			verb := "copied"
@@ -217,7 +267,11 @@ func cmdImport(args []string) error {
 		touched[filepath.Dir(dst)] = true
 	}
 
-	printSummary(cfg.Library, imported, dups, unsorted, touched, *dryRun)
+	if importBar != nil {
+		importBar.Finish()
+		fmt.Fprintln(os.Stderr)
+	}
+	printSummary(cfg.Library, imported, dups, skipped, unsorted, touched, *dryRun, time.Since(start))
 	return nil
 }
 
@@ -517,12 +571,15 @@ func collectMedia(root string) ([]string, error) {
 	return paths, err
 }
 
-func printSummary(library string, imported, dups, unsorted int, touched map[string]bool, dryRun bool) {
+func printSummary(library string, imported, dups, skipped, unsorted int, touched map[string]bool, dryRun bool, elapsed time.Duration) {
 	verb := "Imported"
 	if dryRun {
 		verb = "Would import"
 	}
-	fmt.Printf("\n%s %d file(s); skipped %d duplicate(s)", verb, imported, dups)
+	fmt.Printf("\n%s %d file(s) in %s; skipped %d duplicate(s)", verb, imported, elapsed.Round(time.Millisecond), dups)
+	if skipped > 0 {
+		fmt.Printf(", %d already processed from this card", skipped)
+	}
 	if unsorted > 0 {
 		fmt.Printf("; %d undated file(s) went to Unsorted/", unsorted)
 	}
