@@ -42,7 +42,17 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 - `photo-import index` — build or refresh the content-hash index.
 - `photo-import stats` — show index location and size.
 - `photo-import config <cmd>` — read/write the config file (see below).
+- `photo-import media list` — list every cached volume: name, id, file count, and last-seen date.
+- `photo-import media clear [<id>…]` — remove a volume's skip-cache entries by id or unambiguous id prefix; with no arguments on a terminal, opens an interactive multiselect.
 - `photo-import version` — print the version.
+
+### Media cache and reformatted cards
+
+Each card is identified by a `.photo-import.toml` marker stamped at the card's volume root.
+Reformatting a card wipes that marker, so the next import treats it as a new card and mints a fresh volume id.
+The old id's cache entries become orphaned: they are never read again but also never removed automatically.
+Use `photo-import media list` to see all cached volumes and `photo-import media clear <id>` to remove stale entries.
+Clearing touches only the index — the card and its files are unchanged — and the next import of that card re-hashes from scratch.
 
 ## Configuration
 

@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS media_files (
 	mtime     INTEGER NOT NULL,
 	PRIMARY KEY (volume_id, path)
 );
+
+CREATE TABLE IF NOT EXISTS volumes (
+	volume_id TEXT PRIMARY KEY,
+	label     TEXT NOT NULL DEFAULT '',
+	last_seen INTEGER NOT NULL DEFAULT 0
+);
 `
 
 const insertSQL = `INSERT INTO files(path, size, mtime, blake3, hashed_at) VALUES(?, ?, ?, ?, ?)
@@ -37,6 +43,9 @@ const putMediaSQL = `INSERT INTO media_files(volume_id, path, size, mtime)
 	VALUES(?, ?, ?, ?)
 	ON CONFLICT(volume_id, path) DO UPDATE SET
 	  size=excluded.size, mtime=excluded.mtime`
+
+const putVolumeSQL = `INSERT INTO volumes(volume_id, label, last_seen) VALUES(?, ?, ?)
+	ON CONFLICT(volume_id) DO UPDATE SET label=excluded.label, last_seen=excluded.last_seen`
 
 // batchSize bounds how many rows accumulate per transaction during a bulk
 // index build, so an interrupted run keeps already-committed batches.
@@ -137,6 +146,70 @@ func (i *Index) VolumeMedia(volumeID string) (map[string]MediaRecord, error) {
 func (i *Index) PutMedia(volumeID, relpath string, size, mtime int64) error {
 	_, err := i.db.Exec(putMediaSQL, volumeID, relpath, size, mtime)
 	return err
+}
+
+// PutVolume upserts the human-readable label and last-seen time for volumeID.
+func (i *Index) PutVolume(volumeID, label string) error {
+	_, err := i.db.Exec(putVolumeSQL, volumeID, label, time.Now().Unix())
+	return err
+}
+
+// VolumeInfo holds display data for one cached volume.
+type VolumeInfo struct {
+	VolumeID  string
+	Label     string
+	FileCount int64
+	LastSeen  time.Time
+}
+
+// Volumes returns every volume present in media_files LEFT JOINed with volumes,
+// so caches created before naming still appear with a blank label.
+func (i *Index) Volumes() ([]VolumeInfo, error) {
+	rows, err := i.db.Query(`
+		SELECT mf.volume_id, COALESCE(v.label, ''), COUNT(mf.path), COALESCE(MAX(v.last_seen), 0)
+		FROM media_files mf
+		LEFT JOIN volumes v ON mf.volume_id = v.volume_id
+		GROUP BY mf.volume_id
+		ORDER BY COALESCE(MAX(v.last_seen), 0) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VolumeInfo
+	for rows.Next() {
+		var vi VolumeInfo
+		var lastUnix int64
+		if err := rows.Scan(&vi.VolumeID, &vi.Label, &vi.FileCount, &lastUnix); err != nil {
+			return nil, err
+		}
+		if lastUnix != 0 {
+			vi.LastSeen = time.Unix(lastUnix, 0)
+		}
+		out = append(out, vi)
+	}
+	return out, rows.Err()
+}
+
+// ClearVolume removes all media_files rows for volumeID and its volumes row,
+// returning the number of media_files rows deleted.
+func (i *Index) ClearVolume(volumeID string) (int64, error) {
+	tx, err := i.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`DELETE FROM media_files WHERE volume_id = ?`, volumeID)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM volumes WHERE volume_id = ?`, volumeID); err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
 }
 
 // Stats returns the number of indexed files and the most recent hash time.

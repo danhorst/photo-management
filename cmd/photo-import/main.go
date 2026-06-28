@@ -12,9 +12,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
+	"text/tabwriter"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/dbh/photo-import/internal/config"
 	"github.com/dbh/photo-import/internal/exif"
 	"github.com/dbh/photo-import/internal/hash"
@@ -36,6 +39,7 @@ Usage:
   photo-import index [flags]      Build/refresh the content-hash index
   photo-import stats [flags]      Show index location and size
   photo-import config <cmd>       Read/write the config file (see below)
+  photo-import media <cmd>        Manage the skip cache (see below)
   photo-import version            Print the version
 
 Config commands:
@@ -45,6 +49,11 @@ Config commands:
   config get <library|database>   Print one effective value
   config set <library|database> <value>
                                   Set a value, creating the file if needed
+
+Media commands:
+  media list                      List cached volumes in the skip cache
+  media clear [<id>…]             Clear volumes by id or prefix; no args
+                                  on a terminal opens a multiselect
 
 Flags:
   -L, --library DIR   Photo library root (overrides config and default)
@@ -69,6 +78,8 @@ func main() {
 		err = cmdStats(args[1:])
 	case "config":
 		err = cmdConfig(args[1:])
+	case "media":
+		err = cmdMedia(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "--help", "-h":
@@ -149,6 +160,13 @@ func cmdImport(args []string) error {
 	if !existed && !*dryRun {
 		if err := volume.Stamp(root, marker); err != nil {
 			return fmt.Errorf("stamping volume: %w", err)
+		}
+	}
+	// Register only when there is media to record, so an empty card cannot leave
+	// a volumes row with no media_files (invisible to media list/clear).
+	if !*dryRun && len(paths) > 0 {
+		if err := idx.PutVolume(volID, filepath.Base(root)); err != nil {
+			return err
 		}
 	}
 	logf("volume %s at %s", volID, root)
@@ -607,4 +625,163 @@ func debugLogger(debug bool) func(string, ...any) {
 		return func(string, ...any) {}
 	}
 	return func(format string, a ...any) { log.Printf(format, a...) }
+}
+
+func cmdMedia(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: photo-import media <list|clear>")
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "list":
+		return cmdMediaList(rest)
+	case "clear":
+		return cmdMediaClear(rest)
+	default:
+		return fmt.Errorf("unknown media command %q (want list, clear)", sub)
+	}
+}
+
+func cmdMediaList(args []string) error {
+	fs := flag.NewFlagSet("media list", flag.ExitOnError)
+	lib, db, _ := commonFlags(fs)
+	if _, err := parseArgs(fs, args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*lib, *db)
+	if err != nil {
+		return err
+	}
+	idx, err := index.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	vols, err := idx.Volumes()
+	if err != nil {
+		return err
+	}
+	if len(vols) == 0 {
+		fmt.Println("no cached volumes")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tID\tFILES\tLAST SEEN")
+	for _, v := range vols {
+		lastSeen := "—"
+		if !v.LastSeen.IsZero() {
+			lastSeen = v.LastSeen.Format("2006-01-02")
+		}
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", displayName(v), v.VolumeID, v.FileCount, lastSeen)
+	}
+	return w.Flush()
+}
+
+func cmdMediaClear(args []string) error {
+	fs := flag.NewFlagSet("media clear", flag.ExitOnError)
+	lib, db, _ := commonFlags(fs)
+	positionals, err := parseArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(*lib, *db)
+	if err != nil {
+		return err
+	}
+	idx, err := index.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	vols, err := idx.Volumes()
+	if err != nil {
+		return err
+	}
+
+	if len(positionals) == 0 {
+		if !isatty.IsTerminal(os.Stdin.Fd()) {
+			return fmt.Errorf("no volume id given — run 'photo-import media list' to see ids, or run interactively on a terminal")
+		}
+		return cmdMediaClearInteractive(idx, vols)
+	}
+
+	for _, sel := range positionals {
+		id, err := resolveVolume(sel, vols)
+		if err != nil {
+			return err
+		}
+		n, err := idx.ClearVolume(id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("cleared %d file(s) from volume %s\n", n, id)
+	}
+	return nil
+}
+
+func cmdMediaClearInteractive(idx *index.Index, vols []index.VolumeInfo) error {
+	if len(vols) == 0 {
+		fmt.Println("no cached volumes")
+		return nil
+	}
+	opts := make([]huh.Option[string], len(vols))
+	for i, v := range vols {
+		label := fmt.Sprintf("%-20s %s  %d files", displayName(v), v.VolumeID, v.FileCount)
+		opts[i] = huh.NewOption(label, v.VolumeID)
+	}
+	var selected []string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title("Select volumes to clear").
+				Options(opts...).
+				Value(&selected),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return err
+	}
+	for _, id := range selected {
+		n, err := idx.ClearVolume(id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("cleared %d file(s) from volume %s\n", n, id)
+	}
+	return nil
+}
+
+// displayName returns the volume's label, or a placeholder for caches created
+// before naming.
+func displayName(v index.VolumeInfo) string {
+	if v.Label == "" {
+		return "(unknown)"
+	}
+	return v.Label
+}
+
+// resolveVolume maps selector to a single volume id by exact match or
+// unambiguous prefix. Errors on ambiguous prefix or label-only input.
+func resolveVolume(selector string, vols []index.VolumeInfo) (string, error) {
+	for _, v := range vols {
+		if v.VolumeID == selector {
+			return v.VolumeID, nil
+		}
+	}
+	var matches []string
+	for _, v := range vols {
+		if strings.HasPrefix(v.VolumeID, selector) {
+			matches = append(matches, v.VolumeID)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no cached volume id starts with %q — run 'photo-import media list' to see ids", selector)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("prefix %q is ambiguous (%d matches) — use a longer prefix or the full id", selector, len(matches))
+	}
 }

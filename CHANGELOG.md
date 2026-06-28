@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- `media list` prints every cached volume (name, id, file count, last seen), including caches created before this change.
+- `media clear [<id>…]` removes a volume's skip-cache entries by exact id or unambiguous prefix; with no arguments on a terminal, shows an interactive multiselect.
+- Each import now records the source volume's human-readable name (mount-point label) and last-seen time in a new `volumes` table, so the cache can be presented by name rather than opaque id.
+- README documents the reformat / orphaned-cache behavior and points at `media clear` as the way to drop stale entries.
+
 ## [0.4.0] - 2026-06-27
 
 ### Added
