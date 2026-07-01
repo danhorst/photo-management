@@ -1,4 +1,4 @@
-// Command photo-import organizes photos into a YYYY/MM library, skipping
+// Command pm organizes photos into a YYYY/MM library, skipping
 // content duplicates using a BLAKE3 hash index, so Capture One only ever has to
 // synchronize genuinely-new files.
 package main
@@ -19,13 +19,13 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/dbh/photo-import/internal/config"
-	"github.com/dbh/photo-import/internal/exif"
-	"github.com/dbh/photo-import/internal/hash"
-	"github.com/dbh/photo-import/internal/index"
-	"github.com/dbh/photo-import/internal/media"
-	"github.com/dbh/photo-import/internal/organize"
-	"github.com/dbh/photo-import/internal/volume"
+	"github.com/dbh/photo-management/internal/config"
+	"github.com/dbh/photo-management/internal/exif"
+	"github.com/dbh/photo-management/internal/hash"
+	"github.com/dbh/photo-management/internal/index"
+	"github.com/dbh/photo-management/internal/media"
+	"github.com/dbh/photo-management/internal/organize"
+	"github.com/dbh/photo-management/internal/volume"
 	"github.com/mattn/go-isatty"
 	"github.com/schollz/progressbar/v3"
 )
@@ -33,15 +33,15 @@ import (
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
-const usage = `photo-import — fast, deduplicating photo importer
+const usage = `pm — fast, deduplicating photo importer
 
 Usage:
-  photo-import <source> [flags]   Import media from a card or queue directory
-  photo-import index [flags]      Build/refresh the content-hash index
-  photo-import stats [flags]      Show index location and size
-  photo-import config <cmd>       Read/write the config file (see below)
-  photo-import media <cmd>        Manage the skip cache (see below)
-  photo-import version            Print the version
+  pm <source> [flags]   Import media from a card or queue directory
+  pm index [flags]      Build/refresh the content-hash index
+  pm stats [flags]      Show index location and size
+  pm config <cmd>       Read/write the config file (see below)
+  pm media <cmd>        Manage the skip cache (see below)
+  pm version            Print the version
 
 Config commands:
   config path                     Print the config file location
@@ -89,7 +89,7 @@ func main() {
 		err = cmdImport(args)
 	}
 	if err != nil {
-		log.Fatalf("photo-import: %v", err)
+		log.Fatalf("pm: %v", err)
 	}
 }
 
@@ -526,7 +526,7 @@ func cmdConfig(args []string) error {
 		return nil
 	case "get":
 		if len(rest) != 1 {
-			return fmt.Errorf("usage: photo-import config get <library|database>")
+			return fmt.Errorf("usage: pm config get <library|database>")
 		}
 		cfg, err := config.Load("", "")
 		if err != nil {
@@ -540,7 +540,7 @@ func cmdConfig(args []string) error {
 		return nil
 	case "set":
 		if len(rest) != 2 {
-			return fmt.Errorf("usage: photo-import config set <library|database> <value>")
+			return fmt.Errorf("usage: pm config set <library|database> <value>")
 		}
 		cfg, err := config.LoadFile()
 		if err != nil {
@@ -630,7 +630,7 @@ func debugLogger(debug bool) func(string, ...any) {
 
 func cmdMedia(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: photo-import media <list|clear>")
+		return fmt.Errorf("usage: pm media <list|clear>")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -711,7 +711,7 @@ func cmdMediaClear(args []string) error {
 
 	if len(positionals) == 0 {
 		if !isatty.IsTerminal(os.Stdin.Fd()) {
-			return fmt.Errorf("no volume id given — run 'photo-import media list' to see ids, or run interactively on a terminal")
+			return fmt.Errorf("no volume id given — run 'pm media list' to see ids, or run interactively on a terminal")
 		}
 		return cmdMediaClearInteractive(idx, vols)
 	}
@@ -787,7 +787,7 @@ func resolveVolume(selector string, vols []index.VolumeInfo) (string, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("no cached volume id starts with %q — run 'photo-import media list' to see ids", selector)
+		return "", fmt.Errorf("no cached volume id starts with %q — run 'pm media list' to see ids", selector)
 	case 1:
 		return matches[0], nil
 	default:

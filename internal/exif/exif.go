@@ -49,7 +49,7 @@ func Dates(paths []string) (map[string]time.Time, error) {
 	}
 
 	// Pass the file list through an args file to avoid command-line length limits.
-	args, err := os.CreateTemp("", "photo-import-exif-*.args")
+	args, err := os.CreateTemp("", "photo-management-exif-*.args")
 	if err != nil {
 		return nil, err
 	}

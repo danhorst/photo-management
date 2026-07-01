@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the tool from `photo-import` to `photo-management`; the binary is now
+  `pm` and installs with `brew install danhorst/tap/pm`. The GitHub repo moved to
+  `danhorst/photo-management` (old URLs redirect).
+- The config file moved to `~/.config/photo-management/photo-management.toml`
+  and the card marker to `.photo-management.toml`. Old-named configs and card
+  markers are still read; stamps and saves write the new names, and the first
+  config save migrates the old file.
+
 ## [0.5.1] - 2026-06-28
 
 ### Changed
@@ -65,9 +75,9 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.5.1...HEAD
-[0.5.1]: https://github.com/danhorst/photo-import/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/danhorst/photo-import/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/danhorst/photo-import/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/danhorst/photo-import/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/danhorst/photo-import/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/danhorst/photo-management/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/danhorst/photo-management/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/danhorst/photo-management/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/danhorst/photo-management/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/danhorst/photo-management/compare/v0.1.0...v0.2.0

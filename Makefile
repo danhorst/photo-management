@@ -5,7 +5,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 all: build
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o bin/photo-import ./cmd/photo-import
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/pm ./cmd/pm
 
 test:
 	go test ./...
@@ -17,4 +17,4 @@ vet:
 	go vet ./...
 
 clean:
-	rm -f bin/photo-import
+	rm -f bin/pm

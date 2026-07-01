@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/dbh/photo-import/internal/index"
+	"github.com/dbh/photo-management/internal/index"
 )
 
 func TestResolveVolume(t *testing.T) {

@@ -57,7 +57,7 @@ jobs:
         id: sha
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          URL="https://github.com/danhorst/photo-import/archive/refs/tags/${TAG}.tar.gz"
+          URL="https://github.com/danhorst/photo-management/archive/refs/tags/${TAG}.tar.gz"
           SHA=$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)
           echo "source=$SHA" >> "$GITHUB_OUTPUT"
 
@@ -83,7 +83,7 @@ jobs:
           python3 - <<'PYEOF'
           import re, os
 
-          formula_path = "tap/Formula/photo-import.rb"
+          formula_path = "tap/Formula/pm.rb"
           tag      = os.environ["TAG"]
           bare     = os.environ["BARE"]
           src_sha  = os.environ["SOURCE_SHA"]
@@ -91,8 +91,8 @@ jobs:
           text = open(formula_path).read()
 
           text = re.sub(
-            r'url "https://github\.com/danhorst/photo-import/archive/refs/tags/v[^"]+"',
-            f'url "https://github.com/danhorst/photo-import/archive/refs/tags/{tag}.tar.gz"',
+            r'url "https://github\.com/danhorst/photo-management/archive/refs/tags/v[^"]+"',
+            f'url "https://github.com/danhorst/photo-management/archive/refs/tags/{tag}.tar.gz"',
             text,
           )
           text = re.sub(
@@ -112,6 +112,6 @@ jobs:
 
           git -C tap config user.name "github-actions[bot]"
           git -C tap config user.email "github-actions[bot]@users.noreply.github.com"
-          git -C tap add Formula/photo-import.rb
-          git -C tap commit -m "Update photo-import to ${TAG}"
+          git -C tap add Formula/pm.rb
+          git -C tap commit -m "Update pm to ${TAG}"
           git -C tap push

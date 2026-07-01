@@ -14,7 +14,12 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const markerName = ".photo-import.toml"
+const (
+	markerName = ".photo-management.toml"
+	// legacyMarkerName is the pre-rename marker, read as a fallback so cards
+	// stamped by photo-import keep their volume identity.
+	legacyMarkerName = ".photo-import.toml"
+)
 
 // Marker is the per-volume record stored at the volume root.
 type Marker struct {
@@ -34,11 +39,16 @@ func Resolve(source string) (root, id string, m Marker, existed bool, err error)
 	return root, id, m, existed, err
 }
 
-// loadMarker reads the marker at root, or returns a Marker with a freshly
-// generated VolumeID and existed=false when none is present.
+// loadMarker reads the marker at root, falling back to the legacy
+// photo-import name, or returns a Marker with a freshly generated VolumeID and
+// existed=false when neither is present.
 func loadMarker(root string) (id string, m Marker, existed bool, err error) {
 	path := filepath.Join(root, markerName)
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		path = filepath.Join(root, legacyMarkerName)
+		data, err = os.ReadFile(path)
+	}
 	if err == nil {
 		if _, err := toml.Decode(string(data), &m); err != nil {
 			return "", Marker{}, false, fmt.Errorf("parsing %s: %w", path, err)

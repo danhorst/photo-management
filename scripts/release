@@ -37,12 +37,12 @@ sd '## \[Unreleased\]' "## [Unreleased]\n\n## [$BARE] - $TODAY" "$CHANGELOG"
 # Update comparison links
 PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -1 || true)
 if [ -n "$PREV_TAG" ]; then
-  sd "\[Unreleased\]: https://github\.com/danhorst/photo-import/compare/.*\.\.\.HEAD" \
-     "[Unreleased]: https://github.com/danhorst/photo-import/compare/${VERSION}...HEAD\n[$BARE]: https://github.com/danhorst/photo-import/compare/${PREV_TAG}...${VERSION}" \
+  sd "\[Unreleased\]: https://github\.com/danhorst/photo-management/compare/.*\.\.\.HEAD" \
+     "[Unreleased]: https://github.com/danhorst/photo-management/compare/${VERSION}...HEAD\n[$BARE]: https://github.com/danhorst/photo-management/compare/${PREV_TAG}...${VERSION}" \
      "$CHANGELOG"
 else
-  sd "\[Unreleased\]: https://github\.com/danhorst/photo-import/compare/.*\.\.\.HEAD" \
-     "[Unreleased]: https://github.com/danhorst/photo-import/compare/${VERSION}...HEAD" \
+  sd "\[Unreleased\]: https://github\.com/danhorst/photo-management/compare/.*\.\.\.HEAD" \
+     "[Unreleased]: https://github.com/danhorst/photo-management/compare/${VERSION}...HEAD" \
      "$CHANGELOG"
 fi
 

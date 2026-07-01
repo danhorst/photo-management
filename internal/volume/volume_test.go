@@ -40,6 +40,40 @@ func TestLoadMarkerGeneratesThenReuses(t *testing.T) {
 	}
 }
 
+func TestLoadMarkerFallsBackToLegacyName(t *testing.T) {
+	root := t.TempDir()
+	legacy := "volume_id = \"cafe0123\"\nlabel = \"EOS_DIGITAL\"\n"
+	if err := os.WriteFile(filepath.Join(root, legacyMarkerName), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	id, m, existed, err := loadMarker(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !existed {
+		t.Error("existed should be true when a legacy marker is present")
+	}
+	if id != "cafe0123" {
+		t.Errorf("id = %q, want the legacy marker's id", id)
+	}
+
+	if err := Stamp(root, m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, markerName)); err != nil {
+		t.Errorf("Stamp must write the new marker name: %v", err)
+	}
+
+	id2, _, _, err := loadMarker(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id2 != id {
+		t.Errorf("id changed after re-stamp: %q then %q", id, id2)
+	}
+}
+
 func TestVolumeRootContainsSource(t *testing.T) {
 	sub := filepath.Join(t.TempDir(), "DCIM", "100_FUJI")
 	if err := os.MkdirAll(sub, 0o755); err != nil {

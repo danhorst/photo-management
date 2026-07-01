@@ -1,4 +1,4 @@
-module github.com/dbh/photo-import
+module github.com/dbh/photo-management
 
 go 1.26.4
 
