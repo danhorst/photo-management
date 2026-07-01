@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS derivative (
 	photos_uuid  TEXT,
 	published_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS photos_manifest (
+	uuid              TEXT PRIMARY KEY,
+	original_filename TEXT NOT NULL,
+	capture_time      INTEGER NOT NULL,
+	catalog_key       TEXT NOT NULL DEFAULT '',
+	last_synced       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manifest_natural
+	ON photos_manifest(capture_time, original_filename);
 `
 
 const insertSQL = `INSERT INTO files(path, size, mtime, blake3, hashed_at) VALUES(?, ?, ?, ?, ?)
@@ -286,6 +296,69 @@ func (i *Index) Derivatives() ([]Derivative, error) {
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// UnpublishedDerivatives returns the derivatives not yet pushed to Apple
+// Photos (photos_uuid is null), ordered by stem then path.
+func (i *Index) UnpublishedDerivatives() ([]Derivative, error) {
+	rows, err := i.db.Query(`
+		SELECT source_hash, stem, source_kind, heic_path, generated_at
+		FROM derivative WHERE photos_uuid IS NULL ORDER BY stem, heic_path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Derivative
+	for rows.Next() {
+		var d Derivative
+		var gen int64
+		if err := rows.Scan(&d.SourceHash, &d.Stem, &d.SourceKind, &d.HeicPath, &gen); err != nil {
+			return nil, err
+		}
+		d.GeneratedAt = time.Unix(gen, 0)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// MarkPublished sets the Photos asset uuid and published_at on the derivative
+// row for sourceHash.
+func (i *Index) MarkPublished(sourceHash, photosUUID string) error {
+	_, err := i.db.Exec(`UPDATE derivative SET photos_uuid = ?, published_at = ? WHERE source_hash = ?`,
+		photosUUID, time.Now().Unix(), sourceHash)
+	return err
+}
+
+const putManifestSQL = `INSERT INTO photos_manifest(uuid, original_filename, capture_time, catalog_key, last_synced)
+	VALUES(?, ?, ?, ?, ?)
+	ON CONFLICT(uuid) DO UPDATE SET
+	  original_filename=excluded.original_filename, capture_time=excluded.capture_time,
+	  catalog_key=excluded.catalog_key, last_synced=excluded.last_synced`
+
+// PutManifest upserts one Apple Photos asset into the manifest cache.
+func (i *Index) PutManifest(uuid, originalFilename string, captureTime time.Time, catalogKey string) error {
+	_, err := i.db.Exec(putManifestSQL, uuid, originalFilename, captureTime.Unix(), catalogKey, time.Now().Unix())
+	return err
+}
+
+// ManifestLookup returns the uuid of a cached Photos asset matching the
+// natural key: capture time plus original filename, compared without
+// extension and case-insensitively (the archive stem encodes the original
+// name bare, Photos records it with its extension).
+func (i *Index) ManifestLookup(originalName string, captureTime time.Time) (uuid string, found bool, err error) {
+	err = i.db.QueryRow(`
+		SELECT uuid FROM photos_manifest
+		WHERE capture_time = ?
+		  AND (original_filename LIKE ? OR original_filename LIKE ?)
+		LIMIT 1`,
+		captureTime.Unix(), originalName, originalName+".%").Scan(&uuid)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return uuid, true, nil
 }
 
 // Stats returns the number of indexed files and the most recent hash time.

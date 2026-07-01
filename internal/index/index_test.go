@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func open(t *testing.T) *Index {
@@ -278,5 +279,81 @@ func TestDerivativeRepeatHashUpserts(t *testing.T) {
 	}
 	if ds[0].HeicPath != "/b.heic" {
 		t.Errorf("upsert should take the latest path, got %s", ds[0].HeicPath)
+	}
+}
+
+func TestManifestUpsertAndNaturalKeyLookup(t *testing.T) {
+	idx := open(t)
+	when := time.Date(2026, 6, 1, 12, 0, 0, 0, time.Local)
+
+	if err := idx.PutManifest("uuid-1", "DSCF1234.JPG", when, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Repeat uuid updates in place.
+	if err := idx.PutManifest("uuid-1", "DSCF1234.JPG", when, "key1"); err != nil {
+		t.Fatal(err)
+	}
+
+	uuid, found, err := idx.ManifestLookup("DSCF1234", when)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || uuid != "uuid-1" {
+		t.Errorf("lookup = %q %v, want uuid-1 (name matched without extension)", uuid, found)
+	}
+
+	uuid, found, err = idx.ManifestLookup("dscf1234", when)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || uuid != "uuid-1" {
+		t.Errorf("lookup should be case-insensitive, got %q %v", uuid, found)
+	}
+
+	if _, found, _ := idx.ManifestLookup("DSCF1234", when.Add(time.Second)); found {
+		t.Error("different capture time should not match")
+	}
+	if _, found, _ := idx.ManifestLookup("DSCF9999", when); found {
+		t.Error("different name should not match")
+	}
+}
+
+func TestMarkPublishedAndUnpublished(t *testing.T) {
+	idx := open(t)
+
+	if err := idx.PutDerivative("hash-a", "stem-a", "jpeg", "/a.heic"); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.PutDerivative("hash-b", "stem-b", "edit", "/b.heic"); err != nil {
+		t.Fatal(err)
+	}
+
+	un, err := idx.UnpublishedDerivatives()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(un) != 2 {
+		t.Fatalf("got %d unpublished, want 2", len(un))
+	}
+
+	if err := idx.MarkPublished("hash-a", "photos-uuid-a"); err != nil {
+		t.Fatal(err)
+	}
+	un, err = idx.UnpublishedDerivatives()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(un) != 1 || un[0].SourceHash != "hash-b" {
+		t.Errorf("unpublished after mark = %+v, want only hash-b", un)
+	}
+
+	ds, err := idx.Derivatives()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range ds {
+		if d.SourceHash == "hash-a" && (d.PhotosUUID != "photos-uuid-a" || d.PublishedAt.IsZero()) {
+			t.Errorf("mark published not recorded: %+v", d)
+		}
 	}
 }

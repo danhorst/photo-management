@@ -11,6 +11,12 @@
   carried over and `catalogKey`/`catalogStem` stamped in XMP. Runs are
   incremental via a new `derivative` index table; `--since` scopes, `--dry-run`
   previews.
+- `pm publish` imports exported HEICs into Apple Photos via `osxphotos` (new
+  runtime dependency), flat with no albums. Two dedup layers: derivatives
+  already pushed are skipped by their recorded `photos_uuid`, and frames already
+  present in Photos are matched on `DateTimeOriginal` + original filename
+  against a new `photos_manifest` cache and associated instead of re-imported.
+  Nothing is ever deleted or replaced; edits import as new assets.
 
 ### Changed
 

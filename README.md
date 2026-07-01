@@ -40,6 +40,7 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 
 - `pm <source>` — import from a directory. Flags: `--dry-run`, `--debug`.
 - `pm export` — generate presentation HEICs into `Export/` (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
+- `pm publish` — import exported HEICs into Apple Photos (see below). Flags: `--dry-run`, `--debug`.
 - `pm index` — build or refresh the content-hash index.
 - `pm stats` — show index location and size.
 - `pm config <cmd>` — read/write the config file (see below).
@@ -58,6 +59,19 @@ Export is incremental: a source whose hash is already recorded in the `derivativ
 `--since YYYY-MM-DD` scopes a run; `--dry-run` reports without writing.
 
 `Export/` is a regenerable presentation mirror — exclude it from backup; only the master tier is backed up.
+
+### Publish
+
+`pm publish` imports the `Export/` HEICs that `export` recorded but has not yet pushed into Apple Photos, as a flat import with no album creation.
+It requires [`osxphotos`](https://github.com/RhetTbull/osxphotos).
+
+Two independent layers keep it from duplicating:
+
+- Our own pushes: a derivative whose `photos_uuid` is already recorded is skipped, so re-runs import nothing already pushed.
+- Pre-existing overlap: a manifest of current Photos assets is built via `osxphotos` at the start of each run, and a frame matching on the natural key (`DateTimeOriginal` + original filename, both encoded in the archive filename) is skipped and associated instead of imported. This also leaves pulled iPhone-origin frames alone.
+
+Nothing is ever deleted or replaced: an edit imports as a new asset alongside existing renders of the frame.
+Apple Photos has no unattended programmatic delete by design — `osxphotos` cannot delete, and PhotoKit forces a confirmation prompt — so publish never supersedes.
 
 ### Media cache and reformatted cards
 
