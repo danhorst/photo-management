@@ -15,9 +15,19 @@ func cmdPublish(args []string) error {
 	lib, db, debug := commonFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "report imports and skips without writing anything")
 	photosLib := fs.String("photos-library", "", "target this Photos library instead of whatever's open (see caveat: osxphotos import ignores this — Photos.app must already have it open)")
+	since := fs.String("since", "", "limit to derivatives captured on/after this date (YYYY-MM-DD)")
 	fs.Usage = func() { fmt.Print(usage) }
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
+	}
+
+	var sinceDate time.Time
+	if *since != "" {
+		t, err := time.ParseInLocation("2006-01-02", *since, time.Local)
+		if err != nil {
+			return fmt.Errorf("--since must be YYYY-MM-DD, got %q", *since)
+		}
+		sinceDate = t
 	}
 
 	cfg, err := config.Load(*lib, *db)
@@ -36,7 +46,7 @@ func cmdPublish(args []string) error {
 		}
 	}
 
-	return publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), *dryRun)
+	return publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), sinceDate, *dryRun)
 }
 
 // verifyActiveLibrary guards the one operation (osxphotos import, via
@@ -75,7 +85,7 @@ func verifyActiveLibrary(want string) error {
 // base derivative whose frame already exists in Photos by natural key,
 // recording the association. Edits always import as new assets; nothing is
 // ever deleted or replaced.
-func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), dryRun bool) error {
+func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sinceDate time.Time, dryRun bool) error {
 	start := time.Now()
 
 	// Refresh the manifest cache and build the natural-key matcher. Under
@@ -101,6 +111,12 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), dr
 
 	var imported, associated, failed int
 	for _, d := range pending {
+		if !sinceDate.IsZero() {
+			captureTime, _, ok := photos.ParseStem(d.Stem)
+			if ok && captureTime.Before(sinceDate) {
+				continue
+			}
+		}
 		// Layer 2 applies to the base only: an edit render exists nowhere in
 		// Photos, so a natural-key hit on its frame must not suppress it.
 		if d.SourceKind != "edit" {

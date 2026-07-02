@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `pm publish` gained `--since YYYY-MM-DD` to limit publishing to derivatives
+  captured on or after a given date, matching `export`/`pull`.
+
 ## [0.6.0] - 2026-07-02
 
 ### Added

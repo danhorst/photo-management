@@ -49,7 +49,7 @@ func TestPublishTwoDedupLayers(t *testing.T) {
 		}
 	}
 
-	if err := publish(idx, lib, discard, false); err != nil {
+	if err := publish(idx, lib, discard, time.Time{}, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -73,11 +73,39 @@ func TestPublishTwoDedupLayers(t *testing.T) {
 
 	// Layer 1: a re-run selects nothing and imports nothing.
 	lib.imported = nil
-	if err := publish(idx, lib, discard, false); err != nil {
+	if err := publish(idx, lib, discard, time.Time{}, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 0 {
 		t.Errorf("re-run imported %v, want nothing", lib.imported)
+	}
+}
+
+func TestPublishSinceFiltersByCaptureDate(t *testing.T) {
+	idx, err := index.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+
+	early := "2026-05-01--09-00-00-DSCF1000"
+	late := "2026-06-15--09-00-00-DSCF1001"
+	for _, d := range []struct{ hash, stem, kind, path string }{
+		{"hash-early", early, "jpeg", "/Export/2026/05/" + early + ".heic"},
+		{"hash-late", late, "jpeg", "/Export/2026/06/" + late + ".heic"},
+	} {
+		if err := idx.PutDerivative(d.hash, d.stem, d.kind, d.path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	lib := &fakeLibrary{}
+	since := time.Date(2026, 6, 1, 0, 0, 0, 0, time.Local)
+	if err := publish(idx, lib, discard, since, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(lib.imported) != 1 || lib.imported[0] != "/Export/2026/06/"+late+".heic" {
+		t.Fatalf("imported %v, want only the derivative on/after --since", lib.imported)
 	}
 }
 
@@ -92,7 +120,7 @@ func TestPublishDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	lib := &fakeLibrary{}
-	if err := publish(idx, lib, discard, true); err != nil {
+	if err := publish(idx, lib, discard, time.Time{}, true); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 0 {
