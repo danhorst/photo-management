@@ -10,6 +10,7 @@ import (
 	"github.com/dbh/photo-management/internal/config"
 	"github.com/dbh/photo-management/internal/index"
 	"github.com/dbh/photo-management/internal/photos"
+	"github.com/mattn/go-isatty"
 )
 
 // puller is the slice of osxphotos that pull needs.
@@ -56,6 +57,7 @@ func cmdPull(args []string) error {
 // import core over the queue — BLAKE3 dedup and YYYY/MM organizing unchanged.
 // Our own published derivatives are excluded by uuid.
 func pull(cfg config.Config, idx *index.Index, lib puller, logf func(string, ...any), since time.Time, dryRun, debug bool) error {
+	showProgress := !debug && isatty.IsTerminal(os.Stderr.Fd())
 	devices := cfg.PullDevices
 	if len(devices) == 0 {
 		devices = config.DefaultPullDevices
@@ -67,6 +69,9 @@ func pull(cfg config.Config, idx *index.Index, lib puller, logf func(string, ...
 		return err
 	}
 
+	if showProgress {
+		fmt.Fprintln(os.Stderr, "querying the Photos library manifest…")
+	}
 	assets, err := lib.Manifest()
 	if err != nil {
 		return err
@@ -89,6 +94,9 @@ func pull(cfg config.Config, idx *index.Index, lib puller, logf func(string, ...
 	}
 
 	queue := queueDir()
+	if showProgress {
+		fmt.Fprintf(os.Stderr, "exporting %d asset(s) from Photos…\n", len(uuids))
+	}
 	if err := lib.Export(queue, uuids); err != nil {
 		return err
 	}

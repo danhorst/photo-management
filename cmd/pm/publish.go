@@ -43,13 +43,16 @@ func cmdPublish(args []string) error {
 	}
 	defer idx.Close()
 
+	showProgress := !*debug && isatty.IsTerminal(os.Stderr.Fd())
 	if *photosLib != "" {
+		if showProgress {
+			fmt.Fprintf(os.Stderr, "verifying Photos.app has %s open (two library queries)…\n", *photosLib)
+		}
 		if err := verifyActiveLibrary(*photosLib); err != nil {
 			return err
 		}
 	}
 
-	showProgress := !*debug && isatty.IsTerminal(os.Stderr.Fd())
 	return publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), showProgress, sinceDate, *dryRun)
 }
 
@@ -94,6 +97,9 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 
 	// Refresh the manifest cache and build the natural-key matcher. Under
 	// --dry-run the cache rows are not written.
+	if showProgress {
+		fmt.Fprintln(os.Stderr, "querying the Photos library manifest…")
+	}
 	assets, err := lib.Manifest()
 	if err != nil {
 		return err
