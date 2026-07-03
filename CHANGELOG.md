@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-03
+
+### Fixed
+
+- `pm export` now renders the master directly via `sips` when a RAW-only frame
+  carries no embedded JPEG — Linear Raw DNGs (HDR merges, panoramas, Topaz
+  upscales) and JPEGs misnamed with a RAW extension — instead of failing with
+  `no embedded JPEG`. The embedded `PreviewImage`/`JpgFromRaw` path stays
+  preferred; identity is unchanged.
+
 ## [0.9.0] - 2026-07-03
 
 ### Added
@@ -156,7 +166,8 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/danhorst/photo-management/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/danhorst/photo-management/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/danhorst/photo-management/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/danhorst/photo-management/compare/v0.7.0...v0.8.0
