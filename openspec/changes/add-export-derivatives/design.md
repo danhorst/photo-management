@@ -29,9 +29,10 @@ drives Capture One and never allocates edit suffixes.
   canonical stem, not naive hyphen-splitting: within a frame group `<stem>.<raw>` is the master,
   `<stem>.JPG` the camera JPEG, `<stem>.HEIC` an iPhone-origin frame, and `<stem>-<suffix>.<img>`
   an edit. Suffixes are free-form labels from the C1 export recipe (`-edit`, `-bw`, `-crop`, …).
-- **Base source: camera JPEG, else embedded JpgFromRaw.** Because most frames are RAF+JPEG the
-  base needs no RAW rendering; a RAW-only frame falls back to the `JpgFromRaw` that exiftool
-  extracts from the RAF. Edits are additive and never suppress the base.
+- **Base source: camera JPEG, else the RAW's embedded JPEG.** Because most frames are RAF+JPEG the
+  base needs no RAW rendering; a RAW-only frame falls back to the full-resolution JPEG exiftool
+  extracts from the RAW — every body in this library exposes it as `PreviewImage`, with `JpgFromRaw`
+  as a fallback. Edits are additive and never suppress the base.
 - **iPhone-origin frames yield no derivative.** A `<stem>.HEIC` with no camera JPEG is already a
   presentation-grade file living in the catalog (pulled in), so export leaves it alone.
 - **HEIC, 4096 px long edge, quality ~70, configurable.** 4096 px (~11 MP) fills a 4K display with

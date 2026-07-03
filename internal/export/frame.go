@@ -144,7 +144,7 @@ type Source struct {
 }
 
 // Sources resolves the frame's derivative sources: one base (the camera JPEG,
-// or the RAW's embedded JpgFromRaw when RAW-only) plus one per baked edit.
+// or the RAW's embedded JPEG when RAW-only) plus one per baked edit.
 // Edits never suppress the base. An iPhone-origin frame (HEIC with no camera
 // JPEG) yields no base.
 func (f Frame) Sources() []Source {

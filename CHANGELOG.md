@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `pm export` now extracts the embedded full-resolution JPEG from RAW-only
+  frames whose RAW stores it as `PreviewImage` (Canon CR2, and Fuji RAF bodies
+  that don't populate `JpgFromRaw`); previously these failed with
+  `no JpgFromRaw in <path>`. The extractor tries `PreviewImage` first, then
+  `JpgFromRaw`.
+
 ## [0.8.0] - 2026-07-03
 
 ### Changed

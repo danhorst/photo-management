@@ -20,8 +20,9 @@ a group as the master (`<stem>.<raw>`), the camera JPEG (`<stem>.JPG`), an iPhon
 ### Requirement: Derivative source resolution
 
 The system SHALL resolve, for each frame, one base derivative source plus one source per baked
-edit. The base source SHALL be the sibling camera JPEG, or the embedded `JpgFromRaw` extracted
-from the RAF when the frame is RAW-only. Edit sources SHALL be every `<stem>-<suffix>` baked
+edit. The base source SHALL be the sibling camera JPEG, or the RAW's embedded full-resolution
+JPEG (`PreviewImage`, else `JpgFromRaw`) when the frame is RAW-only.
+Edit sources SHALL be every `<stem>-<suffix>` baked
 file. Edits are additive and SHALL NOT suppress the base. An iPhone-origin frame (a `<stem>.HEIC`
 with no camera JPEG) SHALL yield no derivative.
 
@@ -32,8 +33,8 @@ with no camera JPEG) SHALL yield no derivative.
 
 #### Scenario: RAW-only frame uses embedded JPEG
 
-- **WHEN** a frame has a RAF but no sibling camera JPEG
-- **THEN** the base source is the `JpgFromRaw` embedded in the RAF
+- **WHEN** a frame has a RAW file but no sibling camera JPEG
+- **THEN** the base source is the RAW's embedded full-resolution JPEG (`PreviewImage`, else `JpgFromRaw`)
 
 #### Scenario: iPhone-origin frame is left alone
 

@@ -87,7 +87,7 @@ func (g *Generator) config() (string, error) {
 // Generate produces the HEIC at dst from src, carrying
 // DateTimeOriginal/GPS/orientation from the archive file and stamping
 // catalogKey (the version id) and catalogStem (the frame id). An embedded
-// source extracts the RAF's JpgFromRaw first.
+// source extracts the RAW's embedded JPEG first.
 func (g *Generator) Generate(src Source, stem, versionID, dst string) error {
 	input := src.Path
 	if src.Kind == "embedded" {
@@ -132,29 +132,42 @@ func (g *Generator) Generate(src Source, stem, versionID, dst string) error {
 	return nil
 }
 
-// extractEmbedded writes the RAF's embedded JpgFromRaw to a temp file and
-// returns its path.
-func extractEmbedded(rafPath string) (string, error) {
-	f, err := os.CreateTemp("", "photo-management-embedded-*.jpg")
-	if err != nil {
-		return "", err
-	}
-	cmd := exec.Command("exiftool", "-b", "-JpgFromRaw", rafPath)
-	cmd.Stdout = f
-	runErr := cmd.Run()
-	closeErr := f.Close()
-	if runErr != nil || closeErr != nil {
-		os.Remove(f.Name())
-		if runErr != nil {
-			return "", fmt.Errorf("extracting JpgFromRaw from %s: %v", rafPath, runErr)
+// embeddedTags names the exiftool tags holding a RAW's full-resolution
+// embedded JPEG, in preference order: every camera body in this library stores
+// it as PreviewImage, so try that first and fall back to JpgFromRaw.
+//
+// Tradeoff: on a Fuji body that populates both, JpgFromRaw is the full-size
+// image and PreviewImage can be a reduced preview — so if such a body is ever
+// added, reverse this ordering (or pick the larger of the two).
+var embeddedTags = []string{"PreviewImage", "JpgFromRaw"}
+
+// extractEmbedded writes the RAW's embedded JPEG to a temp file and returns its
+// path, trying each of embeddedTags in turn until one yields bytes.
+func extractEmbedded(rawPath string) (string, error) {
+	for _, tag := range embeddedTags {
+		out, err := exec.Command("exiftool", "-b", "-"+tag, rawPath).Output()
+		if err != nil {
+			return "", fmt.Errorf("extracting %s from %s: %v", tag, rawPath, err)
 		}
-		return "", closeErr
+		if len(out) == 0 {
+			continue
+		}
+		f, err := os.CreateTemp("", "photo-management-embedded-*.jpg")
+		if err != nil {
+			return "", err
+		}
+		if _, err := f.Write(out); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return "", err
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(f.Name())
+			return "", err
+		}
+		return f.Name(), nil
 	}
-	if fi, err := os.Stat(f.Name()); err != nil || fi.Size() == 0 {
-		os.Remove(f.Name())
-		return "", fmt.Errorf("no JpgFromRaw in %s", rafPath)
-	}
-	return f.Name(), nil
+	return "", fmt.Errorf("no embedded JPEG in %s", rawPath)
 }
 
 // DestPath returns Export/YYYY/MM/<stem>.heic for the base or
