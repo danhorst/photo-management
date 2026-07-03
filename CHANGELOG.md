@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-03
+
 ### Changed
 
 - `pm export` hashes source files in parallel and reuses the shared content
@@ -126,7 +128,8 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/danhorst/photo-management/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/danhorst/photo-management/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/danhorst/photo-management/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/danhorst/photo-management/compare/v0.5.0...v0.5.1
