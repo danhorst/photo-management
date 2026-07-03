@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,13 +11,17 @@ import (
 )
 
 type fakeLibrary struct {
-	assets   []photos.Asset
-	imported []string
+	assets    []photos.Asset
+	imported  []string
+	importErr error
 }
 
 func (f *fakeLibrary) Manifest() ([]photos.Asset, error) { return f.assets, nil }
 
 func (f *fakeLibrary) Import(path string) (string, error) {
+	if f.importErr != nil {
+		return "", f.importErr
+	}
 	f.imported = append(f.imported, path)
 	return "new-uuid-" + filepath.Base(path), nil
 }
@@ -49,7 +54,7 @@ func TestPublishTwoDedupLayers(t *testing.T) {
 		}
 	}
 
-	if err := publish(idx, lib, discard, time.Time{}, false); err != nil {
+	if err := publish(idx, lib, discard, false, time.Time{}, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -73,7 +78,7 @@ func TestPublishTwoDedupLayers(t *testing.T) {
 
 	// Layer 1: a re-run selects nothing and imports nothing.
 	lib.imported = nil
-	if err := publish(idx, lib, discard, time.Time{}, false); err != nil {
+	if err := publish(idx, lib, discard, false, time.Time{}, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 0 {
@@ -101,11 +106,34 @@ func TestPublishSinceFiltersByCaptureDate(t *testing.T) {
 
 	lib := &fakeLibrary{}
 	since := time.Date(2026, 6, 1, 0, 0, 0, 0, time.Local)
-	if err := publish(idx, lib, discard, since, false); err != nil {
+	if err := publish(idx, lib, discard, false, since, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 1 || lib.imported[0] != "/Export/2026/06/"+late+".heic" {
 		t.Fatalf("imported %v, want only the derivative on/after --since", lib.imported)
+	}
+}
+
+func TestPublishImportFailureIsNonFatal(t *testing.T) {
+	idx, err := index.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+
+	if err := idx.PutDerivative("hash-a", "2026-06-01--12-00-00-DSCF1234", "jpeg", "/a.heic"); err != nil {
+		t.Fatal(err)
+	}
+	lib := &fakeLibrary{importErr: errors.New("osxphotos import /a.heic: exit status 1")}
+	if err := publish(idx, lib, discard, false, time.Time{}, false); err != nil {
+		t.Fatalf("a failed import must not abort the run: %v", err)
+	}
+	un, err := idx.UnpublishedDerivatives()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(un) != 1 {
+		t.Errorf("a failed import must leave the derivative unpublished, got %d unpublished", len(un))
 	}
 }
 
@@ -120,7 +148,7 @@ func TestPublishDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	lib := &fakeLibrary{}
-	if err := publish(idx, lib, discard, time.Time{}, true); err != nil {
+	if err := publish(idx, lib, discard, false, time.Time{}, true); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 0 {

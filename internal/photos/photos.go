@@ -114,6 +114,31 @@ func fullDiskAccessHint(output []byte) string {
 	return ""
 }
 
+// automationHint appends a plain-language hint to osxphotos output that carries
+// macOS's TCC signature for a missing Automation (Apple Events) grant. Without
+// it osxphotos cannot drive Photos.app and surfaces a raw Python traceback
+// ending in AppleScriptError -1743.
+func automationHint(output []byte) string {
+	s := string(output)
+	if strings.Contains(s, "-1743") || strings.Contains(s, "Not authorized to send Apple events") {
+		return "\nhint: your terminal app isn't allowed to control Photos — enable it in System Settings > Privacy & Security > Automation (or run `tccutil reset AppleEvents` and retry to re-trigger the prompt)"
+	}
+	return ""
+}
+
+// lastLine returns the last non-blank line of output, trimmed — the actual
+// error osxphotos prints (e.g. AppleScriptError: …) without the traceback above
+// it.
+func lastLine(output []byte) string {
+	lines := strings.Split(string(output), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // exitErrOutput returns the captured stderr from err when it is an
 // *exec.ExitError (as populated by Cmd.Output), or nil otherwise.
 func exitErrOutput(err error) []byte {
@@ -178,7 +203,7 @@ func (o OSXPhotos) Import(path string) (string, error) {
 	args := append([]string{"import", path, "--report", report.Name(), "--no-progress"}, o.libraryArgs()...)
 	out, err := exec.Command("osxphotos", args...).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("osxphotos import %s: %v: %s%s", path, err, out, fullDiskAccessHint(out))
+		return "", fmt.Errorf("osxphotos import %s: %v: %s%s%s", path, err, lastLine(out), fullDiskAccessHint(out), automationHint(out))
 	}
 
 	data, err := os.ReadFile(report.Name())

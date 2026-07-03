@@ -128,3 +128,25 @@ func TestFullDiskAccessHint(t *testing.T) {
 		t.Errorf("nil output should yield no hint, got %q", h)
 	}
 }
+
+func TestAutomationHint(t *testing.T) {
+	if h := automationHint([]byte("some unrelated osxphotos error")); h != "" {
+		t.Errorf("unrelated output should yield no hint, got %q", h)
+	}
+	if h := automationHint([]byte("...ScriptError: Not authorized to send Apple events to Photos. (-1743)...")); h == "" {
+		t.Error("the -1743 automation signature should yield a hint")
+	}
+	if h := automationHint(nil); h != "" {
+		t.Errorf("nil output should yield no hint, got %q", h)
+	}
+}
+
+func TestLastLine(t *testing.T) {
+	traceback := "Traceback (most recent call last):\n  frame\n\nAppleScriptError: Not authorized to send Apple events to Photos. (-1743)\n\n"
+	if got := lastLine([]byte(traceback)); got != "AppleScriptError: Not authorized to send Apple events to Photos. (-1743)" {
+		t.Errorf("lastLine = %q, want the final AppleScriptError line", got)
+	}
+	if got := lastLine(nil); got != "" {
+		t.Errorf("lastLine(nil) = %q, want empty", got)
+	}
+}

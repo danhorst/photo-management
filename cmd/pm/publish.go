@@ -3,11 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/dbh/photo-management/internal/config"
 	"github.com/dbh/photo-management/internal/index"
 	"github.com/dbh/photo-management/internal/photos"
+	"github.com/mattn/go-isatty"
+	"github.com/schollz/progressbar/v3"
 )
 
 func cmdPublish(args []string) error {
@@ -46,7 +49,8 @@ func cmdPublish(args []string) error {
 		}
 	}
 
-	return publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), sinceDate, *dryRun)
+	showProgress := !*debug && isatty.IsTerminal(os.Stderr.Fd())
+	return publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), showProgress, sinceDate, *dryRun)
 }
 
 // verifyActiveLibrary guards the one operation (osxphotos import, via
@@ -85,7 +89,7 @@ func verifyActiveLibrary(want string) error {
 // base derivative whose frame already exists in Photos by natural key,
 // recording the association. Edits always import as new assets; nothing is
 // ever deleted or replaced.
-func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sinceDate time.Time, dryRun bool) error {
+func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), showProgress bool, sinceDate time.Time, dryRun bool) error {
 	start := time.Now()
 
 	// Refresh the manifest cache and build the natural-key matcher. Under
@@ -110,6 +114,13 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), si
 	}
 
 	var imported, associated, failed int
+	var firstErr error
+
+	// Phase 1: drop --since skips and settle Layer-2 associations (fast index
+	// writes), collecting the derivatives that still need an actual Photos
+	// import. Sizing the bar to this set — not len(pending) — keeps its length
+	// honest under --since and keeps it from blasting through instant skips.
+	var toImport []index.Derivative
 	for _, d := range pending {
 		if !sinceDate.IsZero() {
 			captureTime, _, ok := photos.ParseStem(d.Stem)
@@ -133,6 +144,19 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), si
 				continue
 			}
 		}
+		toImport = append(toImport, d)
+	}
+
+	// Phase 2: the slow work — one osxphotos import per derivative. The bar
+	// advances only here, so it reflects real progress rather than skips.
+	var bar *progressbar.ProgressBar
+	if showProgress && !dryRun && len(toImport) > 0 {
+		bar = progressbar.Default(int64(len(toImport)), "publishing")
+	}
+	for _, d := range toImport {
+		if bar != nil {
+			bar.Add(1)
+		}
 		if dryRun {
 			imported++
 			logf("would import %s", d.HeicPath)
@@ -142,6 +166,9 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), si
 		if err != nil {
 			failed++
 			logf("import %s: %v", d.HeicPath, err)
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		if err := idx.MarkPublished(d.SourceHash, uuid); err != nil {
@@ -149,6 +176,11 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), si
 		}
 		imported++
 		logf("imported %s as %s", d.HeicPath, uuid)
+	}
+
+	if bar != nil {
+		bar.Finish()
+		fmt.Fprintln(os.Stderr)
 	}
 
 	verb := "Published"
@@ -160,5 +192,8 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), si
 		fmt.Printf("; %d error(s)", failed)
 	}
 	fmt.Println(".")
+	if firstErr != nil {
+		fmt.Fprintf(os.Stderr, "first error: %v\n", firstErr)
+	}
 	return nil
 }
