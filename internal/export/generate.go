@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 )
 
 const (
@@ -39,15 +40,20 @@ const exiftoolConfig = `%Image::ExifTool::UserDefined = (
 `
 
 // Generator transcodes derivative sources to presentation HEICs via sips and
-// stamps identity and carried metadata via exiftool.
+// stamps identity and carried metadata via exiftool. Safe for concurrent use
+// by multiple goroutines: Generate has no other shared mutable state once the
+// exiftool config is materialized.
 type Generator struct {
 	LongEdge int
 	Quality  int
 
+	configOnce sync.Once
 	configPath string // materialized exiftool config, created lazily
+	configErr  error
 }
 
-// Close removes the materialized exiftool config, if any.
+// Close removes the materialized exiftool config, if any. Call only after
+// every Generate call has returned.
 func (g *Generator) Close() {
 	if g.configPath != "" {
 		os.Remove(g.configPath)
@@ -56,24 +62,26 @@ func (g *Generator) Close() {
 }
 
 func (g *Generator) config() (string, error) {
-	if g.configPath != "" {
-		return g.configPath, nil
-	}
-	f, err := os.CreateTemp("", "photo-management-exiftool-*.config")
-	if err != nil {
-		return "", err
-	}
-	if _, err := f.WriteString(exiftoolConfig); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return "", err
-	}
-	g.configPath = f.Name()
-	return g.configPath, nil
+	g.configOnce.Do(func() {
+		f, err := os.CreateTemp("", "photo-management-exiftool-*.config")
+		if err != nil {
+			g.configErr = err
+			return
+		}
+		if _, err := f.WriteString(exiftoolConfig); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			g.configErr = err
+			return
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(f.Name())
+			g.configErr = err
+			return
+		}
+		g.configPath = f.Name()
+	})
+	return g.configPath, g.configErr
 }
 
 // Generate produces the HEIC at dst from src, carrying

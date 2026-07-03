@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `pm export` hashes source files in parallel and reuses the shared content
+  index (the `files` table) instead of re-hashing, so an unchanged file is never
+  re-read — re-exporting an already-indexed library drops from tens of minutes
+  to seconds. HEIC generation is parallelized across CPUs.
+
+### Fixed
+
+- `pm export` no longer descends into nested `Unsorted/` directories, and skips
+  (rather than panicking on) archive files whose name is not a canonical
+  `YYYY-MM-DD--HH-MM-SS-<original>` stem; skipped frames are reported.
+
 ## [0.7.0] - 2026-07-02
 
 ### Added

@@ -258,6 +258,63 @@ func (i *Index) PutDerivative(sourceHash, stem, sourceKind, heicPath string) err
 	return err
 }
 
+// DerivativeBatch buffers PutDerivative calls in transactions of batchSize
+// rows, committing each so a bulk export avoids one fsync per row while
+// staying resumable.
+type DerivativeBatch struct {
+	idx  *Index
+	tx   *sql.Tx
+	stmt *sql.Stmt
+	n    int
+}
+
+// BeginDerivatives starts a batched derivative write. Call Commit when done,
+// or Rollback to discard the current (uncommitted) batch; already-committed
+// batches persist.
+func (i *Index) BeginDerivatives() (*DerivativeBatch, error) {
+	b := &DerivativeBatch{idx: i}
+	if err := b.start(); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (b *DerivativeBatch) start() error {
+	tx, err := b.idx.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(putDerivativeSQL)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	b.tx, b.stmt, b.n = tx, stmt, 0
+	return nil
+}
+
+// Put adds a derivative row, committing and reopening the transaction every
+// batchSize rows.
+func (b *DerivativeBatch) Put(sourceHash, stem, sourceKind, heicPath string) error {
+	if _, err := b.stmt.Exec(sourceHash, stem, sourceKind, heicPath, time.Now().Unix()); err != nil {
+		return err
+	}
+	b.n++
+	if b.n >= batchSize {
+		if err := b.tx.Commit(); err != nil {
+			return err
+		}
+		return b.start()
+	}
+	return nil
+}
+
+// Commit flushes the final partial batch.
+func (b *DerivativeBatch) Commit() error { return b.tx.Commit() }
+
+// Rollback discards the current uncommitted batch.
+func (b *DerivativeBatch) Rollback() error { return b.tx.Rollback() }
+
 // HasDerivative reports whether a derivative was already generated from the
 // source with the given content hash.
 func (i *Index) HasDerivative(sourceHash string) (bool, error) {

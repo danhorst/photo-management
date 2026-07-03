@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/dbh/photo-management/internal/config"
@@ -69,66 +71,220 @@ func cmdExport(args []string) error {
 		src   export.Source
 	}
 	var jobs []work
+	var malformed int
 	for _, f := range frames {
-		if !sinceDate.IsZero() {
-			d, ok := f.CaptureDate()
-			if !ok || d.Before(sinceDate) {
-				continue
-			}
+		d, ok := f.CaptureDate()
+		if !ok {
+			malformed++
+			logf("skip %s: stem is not a canonical capture-date name", f.Stem)
+			continue
+		}
+		if !sinceDate.IsZero() && d.Before(sinceDate) {
+			continue
 		}
 		for _, s := range f.Sources() {
 			jobs = append(jobs, work{f, s})
 		}
 	}
-
-	showProgress := !*debug && !*dryRun && isatty.IsTerminal(os.Stderr.Fd())
-	var bar *progressbar.ProgressBar
-	if showProgress && len(jobs) > 0 {
-		bar = progressbar.Default(int64(len(jobs)), "exporting")
+	if malformed > 0 {
+		fmt.Printf("skipped %d frame(s) with a non-canonical name (see --debug)\n", malformed)
 	}
 
 	gen := &export.Generator{LongEdge: longEdge, Quality: quality}
 	defer gen.Close()
 
-	var generated, skipped, failed int
-	for _, w := range jobs {
-		if bar != nil {
-			bar.Add(1)
+	// Scan phase: resolve each job to its source content hash and drop the ones
+	// whose derivative already exists. Hashing is parallel and reuses the shared
+	// files index (idx.Cached), so an unchanged file is never re-read — whether
+	// it was hashed by a prior `index`, a prior `export`, or earlier this run.
+	// Only DB reads happen here; the memoizing writes are deferred until after
+	// the workers finish, since index.Open caps the db at one connection and an
+	// open write transaction would block the concurrent reads.
+	type genJob struct {
+		w   work
+		h   string
+		dst string
+	}
+	type scanResult struct {
+		w           work
+		hash        string
+		size, mtime int64
+		fresh       bool // hashed this run (not from cache) -> memoize
+		err         error
+	}
+
+	showScan := !*debug && isatty.IsTerminal(os.Stderr.Fd())
+	var scanBar *progressbar.ProgressBar
+	if showScan && len(jobs) > 0 {
+		scanBar = progressbar.Default(int64(len(jobs)), "scanning")
+	}
+
+	scanCh := make(chan work)
+	scanResCh := make(chan scanResult)
+	var scanWG sync.WaitGroup
+	for i := 0; i < runtime.NumCPU(); i++ {
+		scanWG.Add(1)
+		go func() {
+			defer scanWG.Done()
+			for w := range scanCh {
+				r := scanResult{w: w}
+				info, err := os.Stat(w.src.Path)
+				if err != nil {
+					r.err = err
+					scanResCh <- r
+					continue
+				}
+				r.size, r.mtime = info.Size(), info.ModTime().Unix()
+				if h, ok := idx.Cached(w.src.Path, r.size, r.mtime); ok {
+					r.hash = h
+				} else if h, err := hash.File(w.src.Path); err != nil {
+					r.err = err
+				} else {
+					r.hash, r.fresh = h, true
+				}
+				scanResCh <- r
+			}
+		}()
+	}
+	go func() {
+		for _, w := range jobs {
+			scanCh <- w
 		}
-		h, err := hash.File(w.src.Path)
-		if err != nil {
+		close(scanCh)
+		scanWG.Wait()
+		close(scanResCh)
+	}()
+
+	type freshFile struct {
+		path        string
+		size, mtime int64
+		hash        string
+	}
+	var toGenerate []genJob
+	var fresh []freshFile
+	var generated, skipped, failed int
+	for r := range scanResCh {
+		if scanBar != nil {
+			scanBar.Add(1)
+		}
+		if r.err != nil {
 			failed++
-			logf("hash %s: %v", w.src.Path, err)
+			logf("hash %s: %v", r.w.src.Path, r.err)
 			continue
 		}
-		has, err := idx.HasDerivative(h)
+		if r.fresh {
+			fresh = append(fresh, freshFile{r.w.src.Path, r.size, r.mtime, r.hash})
+		}
+		has, err := idx.HasDerivative(r.hash)
 		if err != nil {
 			return err
 		}
 		if has {
 			skipped++
-			logf("skip %s (already generated)", w.src.Path)
+			logf("skip %s (already generated)", r.w.src.Path)
 			continue
 		}
-		dst := export.DestPath(cfg.Library, w.frame, w.src)
+		dst := export.DestPath(cfg.Library, r.w.frame, r.w.src)
 		if *dryRun {
 			generated++
-			logf("would export %s -> %s", w.src.Path, dst)
+			logf("would export %s -> %s", r.w.src.Path, dst)
 			continue
 		}
-		if err := gen.Generate(w.src, w.frame.Stem, h, dst); err != nil {
-			failed++
-			logf("export %s: %v", w.src.Path, err)
-			continue
-		}
-		if err := idx.PutDerivative(h, w.frame.Stem, w.src.Kind, dst); err != nil {
+		toGenerate = append(toGenerate, genJob{r.w, r.hash, dst})
+	}
+	if scanBar != nil {
+		scanBar.Finish()
+		fmt.Fprintln(os.Stderr)
+	}
+
+	// Memoize freshly hashed files into the shared index so a later run skips
+	// the read. Safe now: the scan workers have finished, so this write
+	// transaction holds the single connection uncontended. Skipped under
+	// --dry-run, which writes nothing.
+	if !*dryRun && len(fresh) > 0 {
+		fb, err := idx.Begin()
+		if err != nil {
 			return err
 		}
-		generated++
-		logf("exported %s -> %s", w.src.Path, dst)
+		for _, f := range fresh {
+			if err := fb.Put(f.path, f.size, f.mtime, f.hash); err != nil {
+				fb.Rollback()
+				return err
+			}
+		}
+		if err := fb.Commit(); err != nil {
+			return err
+		}
 	}
-	if bar != nil {
-		bar.Finish()
+
+	// Generate phase: sips+exiftool per job, parallelized since each is a
+	// subprocess spawn dominated by wait time. Writes funnel through the
+	// batch on the main goroutine only; workers touch no shared state besides
+	// the Generator (safe for concurrent Generate calls).
+	var exportBar *progressbar.ProgressBar
+	if !*dryRun && !*debug && isatty.IsTerminal(os.Stderr.Fd()) && len(toGenerate) > 0 {
+		exportBar = progressbar.Default(int64(len(toGenerate)), "exporting")
+	}
+	if len(toGenerate) > 0 {
+		batch, err := idx.BeginDerivatives()
+		if err != nil {
+			return err
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				batch.Rollback()
+			}
+		}()
+
+		type genResult struct {
+			gj  genJob
+			err error
+		}
+		jobCh := make(chan genJob)
+		resCh := make(chan genResult)
+		var wg sync.WaitGroup
+		for i := 0; i < runtime.NumCPU(); i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for gj := range jobCh {
+					err := gen.Generate(gj.w.src, gj.w.frame.Stem, gj.h, gj.dst)
+					resCh <- genResult{gj, err}
+				}
+			}()
+		}
+		go func() {
+			for _, gj := range toGenerate {
+				jobCh <- gj
+			}
+			close(jobCh)
+			wg.Wait()
+			close(resCh)
+		}()
+
+		for r := range resCh {
+			if exportBar != nil {
+				exportBar.Add(1)
+			}
+			if r.err != nil {
+				failed++
+				logf("export %s: %v", r.gj.w.src.Path, r.err)
+				continue
+			}
+			if err := batch.Put(r.gj.h, r.gj.w.frame.Stem, r.gj.w.src.Kind, r.gj.dst); err != nil {
+				return err
+			}
+			generated++
+			logf("exported %s -> %s", r.gj.w.src.Path, r.gj.dst)
+		}
+		if err := batch.Commit(); err != nil {
+			return err
+		}
+		committed = true
+	}
+	if exportBar != nil {
+		exportBar.Finish()
 		fmt.Fprintln(os.Stderr)
 	}
 
@@ -164,7 +320,11 @@ func collectArchive(library string) ([]string, error) {
 				return nil
 			}
 			if d.IsDir() {
-				if media.IsExcludedDir(d.Name()) {
+				// Unsorted/ holds files import couldn't derive a canonical
+				// stem for (see main.go's "manual review" bucket); export's
+				// frame grouping assumes every archive name is canonical, so
+				// these must stay out of the walk even nested under a year.
+				if d.Name() == "Unsorted" || media.IsExcludedDir(d.Name()) {
 					return filepath.SkipDir
 				}
 				return nil
