@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-03
+
+### Fixed
+
+- `pm publish` and `pm pull` now announce the slow osxphotos calls — the
+  full-library manifest query, the active-library check, and the export — on
+  stderr instead of sitting silent before the first output.
+
 ## [0.9.1] - 2026-07-03
 
 ### Fixed
@@ -166,7 +174,8 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/danhorst/photo-management/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/danhorst/photo-management/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/danhorst/photo-management/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/danhorst/photo-management/compare/v0.8.0...v0.8.1
