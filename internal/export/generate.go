@@ -1,6 +1,7 @@
 package export
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -92,11 +93,16 @@ func (g *Generator) Generate(src Source, stem, versionID, dst string) error {
 	input := src.Path
 	if src.Kind == "embedded" {
 		tmp, err := extractEmbedded(src.Path)
-		if err != nil {
+		switch {
+		case err == nil:
+			defer os.Remove(tmp)
+			input = tmp
+		case errors.Is(err, errNoEmbeddedJPEG):
+			// No embedded JPEG (a Linear Raw DNG, or a JPEG misnamed with a
+			// RAW extension): render the master directly via sips.
+		default:
 			return err
 		}
-		defer os.Remove(tmp)
-		input = tmp
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -141,8 +147,13 @@ func (g *Generator) Generate(src Source, stem, versionID, dst string) error {
 // added, reverse this ordering (or pick the larger of the two).
 var embeddedTags = []string{"PreviewImage", "JpgFromRaw"}
 
+// errNoEmbeddedJPEG reports that a master carries none of embeddedTags, so its
+// derivative must be rendered from the master directly rather than extracted.
+var errNoEmbeddedJPEG = errors.New("no embedded JPEG")
+
 // extractEmbedded writes the RAW's embedded JPEG to a temp file and returns its
-// path, trying each of embeddedTags in turn until one yields bytes.
+// path, trying each of embeddedTags in turn until one yields bytes. When none
+// yield bytes it returns errNoEmbeddedJPEG.
 func extractEmbedded(rawPath string) (string, error) {
 	for _, tag := range embeddedTags {
 		out, err := exec.Command("exiftool", "-b", "-"+tag, rawPath).Output()
@@ -167,7 +178,7 @@ func extractEmbedded(rawPath string) (string, error) {
 		}
 		return f.Name(), nil
 	}
-	return "", fmt.Errorf("no embedded JPEG in %s", rawPath)
+	return "", fmt.Errorf("%w in %s", errNoEmbeddedJPEG, rawPath)
 }
 
 // DestPath returns Export/YYYY/MM/<stem>.heic for the base or
