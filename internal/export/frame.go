@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/dbh/photo-management/internal/organize"
 )
 
 // rawExt is the set of RAW master extensions (lowercase, with dot).
@@ -37,17 +39,11 @@ type Frame struct {
 	Edits  []Edit
 }
 
-// CaptureDate parses the frame's capture date from the stem's timestamp
-// prefix.
+// CaptureDate parses the frame's capture date from the stem, accepting second,
+// day, or month precision.
 func (f Frame) CaptureDate() (time.Time, bool) {
-	if len(f.Stem) < 10 {
-		return time.Time{}, false
-	}
-	t, err := time.ParseInLocation("2006-01-02", f.Stem[:10], time.Local)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
+	t, _, _, ok := organize.ParseStem(f.Stem)
+	return t, ok
 }
 
 // Group classifies paths into frames keyed off the canonical stem. A name that

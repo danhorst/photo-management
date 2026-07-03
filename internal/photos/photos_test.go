@@ -26,6 +26,16 @@ func TestParseStem(t *testing.T) {
 	if _, _, ok := ParseStem("not-a-stem"); ok {
 		t.Error("malformed stem should not parse")
 	}
+
+	// Reduced-precision stems now parse, so publish/pull no longer reject them.
+	tm, orig, ok = ParseStem("2021-12-05-IMG_0003")
+	if !ok || orig != "IMG_0003" || tm.Format("2006-01-02") != "2021-12-05" {
+		t.Errorf("day stem = %v %q %v", tm, orig, ok)
+	}
+	tm, orig, ok = ParseStem("2021-12-IMG_0003")
+	if !ok || orig != "IMG_0003" || tm.Format("2006-01-02") != "2021-12-01" {
+		t.Errorf("month stem = %v %q %v", tm, orig, ok)
+	}
 }
 
 func date(s string) time.Time {

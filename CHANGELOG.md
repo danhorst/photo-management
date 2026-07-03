@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- `pm recanon` renames non-canonical archive files — those with no
+  `YYYY-MM-DD--HH-MM-SS-` stem, like film scans filed by month — to a
+  reduced-precision canonical name derived from their `YYYY/MM` folder
+  (`YYYY-MM-<original>`), or `YYYY-MM-DD-<original>` with `--date`. `--match`
+  scopes to a batch, `--dry-run` previews, and the content index follows the
+  rename.
+
+### Changed
+
+- Canonical stems now parse at day (`YYYY-MM-DD-<original>`) and month
+  (`YYYY-MM-<original>`) precision as well as full second precision, through one
+  shared parser. `export`, `publish`, and `pull` accept reduced-precision frames
+  instead of skipping or silently rejecting them.
+
 ## [0.8.1] - 2026-07-03
 
 ### Fixed

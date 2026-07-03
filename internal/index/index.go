@@ -134,6 +134,14 @@ func (i *Index) Put(path string, size, mtime int64, hash string) error {
 	return err
 }
 
+// Rename updates the stored path for a file whose content is unchanged, keeping
+// the index consistent after a rename made through this tool. A missing oldPath
+// row is a no-op — the file simply was not indexed yet.
+func (i *Index) Rename(oldPath, newPath string) error {
+	_, err := i.db.Exec(`UPDATE files SET path = ? WHERE path = ?`, newPath, oldPath)
+	return err
+}
+
 // MediaRecord holds the size and mtime recorded for a file on a volume, enough
 // to decide whether a re-import can skip re-hashing it.
 type MediaRecord struct {

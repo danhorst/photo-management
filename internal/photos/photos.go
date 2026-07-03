@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dbh/photo-management/internal/organize"
 )
 
 // Asset is one Apple Photos asset, as reported by the manifest query.
@@ -38,20 +40,16 @@ type Library interface {
 	Import(path string) (uuid string, err error)
 }
 
-// stemLayout is the timestamp prefix of a canonical archive stem.
+// stemLayout is the timestamp prefix of a canonical archive stem, the natural
+// key's wall-clock format.
 const stemLayout = "2006-01-02--15-04-05"
 
-// ParseStem splits a canonical stem (YYYY-MM-DD--HH-MM-SS-<original>) into
-// its capture time and original name.
+// ParseStem splits a canonical stem into its capture time and original name,
+// accepting second, day, or month precision (reduced-precision times fall on
+// midnight / the first of the month).
 func ParseStem(stem string) (t time.Time, original string, ok bool) {
-	if len(stem) < len(stemLayout)+2 || stem[len(stemLayout)] != '-' {
-		return time.Time{}, "", false
-	}
-	t, err := time.ParseInLocation(stemLayout, stem[:len(stemLayout)], time.Local)
-	if err != nil {
-		return time.Time{}, "", false
-	}
-	return t, stem[len(stemLayout)+1:], true
+	t, _, original, ok = organize.ParseStem(stem)
+	return t, original, ok
 }
 
 // Matcher matches archive frames against Photos assets on the natural key:

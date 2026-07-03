@@ -117,3 +117,21 @@ func TestCaptureDate(t *testing.T) {
 		t.Error("malformed stem should not parse")
 	}
 }
+
+func TestCaptureDateReducedPrecision(t *testing.T) {
+	// Day- and month-precision stems are canonical too: export must date them
+	// rather than skip them as non-canonical.
+	for stem, want := range map[string]string{
+		"2021-12-05-IMG_0003":                      "2021-12-05",
+		"2021-12-IMG_0003-ZF-9821-41309-1-001-004": "2021-12-01",
+	} {
+		d, ok := (Frame{Stem: stem}).CaptureDate()
+		if !ok || d.Format("2006-01-02") != want {
+			t.Errorf("CaptureDate(%q) = %v %v, want %s", stem, d, ok, want)
+		}
+	}
+	// A name with no leading date is still non-canonical.
+	if _, ok := (Frame{Stem: "IMG_0003-ZF-9821-41309-1-001-004"}).CaptureDate(); ok {
+		t.Error("bare non-canonical stem should not parse")
+	}
+}

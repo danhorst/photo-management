@@ -40,6 +40,7 @@ Usage:
   pm export [flags]     Generate presentation HEICs into Export/
   pm publish [flags]    Import exported HEICs into Apple Photos
   pm pull [flags]       Pull iPhone photos from Apple Photos into the archive
+  pm recanon [flags]    Rename non-canonical archive files to a reduced-precision name
   pm index [flags]      Build/refresh the content-hash index
   pm stats [flags]      Show index location and size
   pm config <cmd>       Read/write the config file (see below)
@@ -63,8 +64,10 @@ Flags:
   -L, --library DIR   Photo library root (overrides config and default)
       --db FILE       Index database path (overrides config and default)
       --debug         Print a detailed activity log
-      --dry-run       Import/export/publish/pull: report actions without writing anything
+      --dry-run       Import/export/publish/pull/recanon: report actions without writing anything
       --since DATE    Export/pull: limit to frames captured on/after YYYY-MM-DD
+      --match SUBSTR  Recanon: limit to frames whose stem contains SUBSTR
+      --date DATE     Recanon: stamp day precision YYYY-MM-DD instead of month-from-folder
       --photos-library PATH
                       Publish/pull: target this Photos library instead of
                       whatever's open (see README for the import caveat)
@@ -86,6 +89,8 @@ func main() {
 		err = cmdPublish(args[1:])
 	case "pull":
 		err = cmdPull(args[1:])
+	case "recanon":
+		err = cmdRecanon(args[1:])
 	case "index":
 		err = cmdIndex(args[1:])
 	case "stats":
