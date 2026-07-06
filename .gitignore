@@ -10,3 +10,6 @@ CLAUDE.md
 # Go build artifacts
 bin/
 /pm
+
+# Temporary files
+tmp/

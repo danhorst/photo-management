@@ -40,7 +40,8 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 
 - `pm <source>` — import from a directory. Flags: `--dry-run`, `--debug`.
 - `pm export` — generate presentation HEICs into `Export/` (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
-- `pm publish` — import exported HEICs into Apple Photos (see below). Flags: `--dry-run`, `--debug`, `--photos-library PATH`.
+- `pm publish` — import exported HEICs into Apple Photos (see below). Flags: `--dry-run`, `--debug`, `--photos-library PATH`, `--batch-size N`, `--settle DUR`, `--stage DIR`.
+- `pm link` — link natively-imported Photos assets back into the index by filename (see below). Flags: `--dry-run`, `--debug`, `--photos-library PATH`.
 - `pm pull` — pull iPhone photos from Apple Photos into the archive (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`, `--photos-library PATH`.
 - `pm index` — build or refresh the content-hash index.
 - `pm stats` — show index location and size.
@@ -55,7 +56,7 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 Each frame yields one base derivative — from the sibling camera JPEG, or the RAF's embedded `JpgFromRaw` when RAW-only — named `<stem>.heic`, plus one `<stem>-<suffix>.heic` per baked Capture One edit.
 iPhone-origin frames (a `.HEIC` with no camera JPEG) are left alone.
 
-Derivatives are resized to a 4096 px long edge at quality 70 (configurable via `export_long_edge` / `export_quality`), carry `DateTimeOriginal`/GPS/orientation, and are stamped with `catalogKey` (BLAKE3 of the source file) and `catalogStem` (the frame stem) in XMP.
+Derivatives are resized to a 4096 px long edge at quality 70 (configurable via `export_long_edge` / `export_quality`), carry `DateTimeOriginal` (falling back to the frame's stem date when the source has none, so a derivative is never undated) along with GPS/orientation, and are stamped with `catalogKey` (BLAKE3 of the source file) and `catalogStem` (the frame stem) in XMP.
 Export is incremental: a source whose hash is already recorded in the `derivative` table is skipped, so re-runs only generate what's new.
 `--since YYYY-MM-DD` scopes a run; `--dry-run` reports without writing.
 
@@ -76,6 +77,30 @@ Two independent layers keep it from duplicating:
 
 Nothing is ever deleted or replaced: an edit imports as a new asset alongside existing renders of the frame.
 Apple Photos has no unattended programmatic delete by design — `osxphotos` cannot delete, and PhotoKit forces a confirmation prompt — so publish never supersedes.
+
+Imports run in batches (`--batch-size`, default 250) with a short pause between them (`--settle`, default 2s).
+`osxphotos` drives Photos over AppleScript, which stays responsive only while Photos is warm, so publish keeps Photos running for the whole run and lets its background queue drain between batches rather than quitting it — a restart would cold-launch the next batch into an unloaded library and hang.
+Leave Photos.app open on the target library before starting.
+A derivative is marked published only when `osxphotos` reports it actually imported; a file Photos rejects stays unpublished, so a re-run retries it.
+
+### Reconcile
+
+`pm reconcile` re-syncs the index's published state to what Apple Photos actually holds.
+It queries the live manifest and clears the published marker from any derivative whose recorded asset is gone from Photos — deleted by hand, or never kept — so the next `pm publish` re-imports it.
+It never deletes anything, and it refuses to run against an empty manifest (a failed query or the wrong open library would otherwise un-mark everything).
+`--dry-run` reports the count without writing.
+
+### Seeding a large library
+
+`osxphotos import` drives Photos over AppleScript, and a whole-library first push (tens of thousands of derivatives) degrades Photos' import subsystem after a couple thousand files — it starts rejecting valid files, and only a full Photos restart clears it.
+For that one-time bulk seed, skip `osxphotos` and let Photos import the files itself:
+
+1. `pm publish --stage DIR` — instead of importing, hardlink every derivative that would be imported into `DIR/YYYY/MM`, mirroring `Export/`. It reuses publish's selection, so frames already in Photos are associated (not staged) and nothing is duplicated. `DIR` must be on the library volume (hardlinks don't cross volumes). Nothing is marked published.
+2. Import the staged tree through Photos' own **File → Import** — a first-party bulk path that doesn't hit the AppleScript wall. Import a year folder at a time if the whole tree is too large in one go.
+3. `pm link` — reconnect the index to what landed. It matches each unpublished derivative to a Photos asset by filename (the asset's original name equals the derivative's HEIC stem — the filename without its extension, a unique key) and marks it published, so later `pm publish` runs skip it. It refuses an empty manifest, never clobbers an existing association, and skips a filename claimed by more than one asset. `--dry-run` reports the counts without writing.
+
+Steady-state incremental publishing stays on `pm publish` — small runs never approach the wall.
+Delete the staging directory once the seed is linked.
 
 ### Pull
 

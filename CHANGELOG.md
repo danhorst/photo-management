@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Performance
+
+- The Photos manifest queries now request only the fields each command uses, via
+  `osxphotos --field`, instead of a full `--json` dump that computes every
+  photo's exif/album/person metadata. `reconcile` and the active-library check
+  query only uuids, `publish` only uuid/filename/capture-time, and `link` only
+  uuid/filename. On a library of tens of thousands of assets this drops the
+  manifest query from ~11 minutes (and gigabytes of RAM) to well under a minute.
+  `pull` still reads the full manifest, since its device allowlist needs camera
+  fields that no cheap template exposes.
+
+### Added
+
+- `pm export` now stamps a frame's canonical stem date onto its derivative HEIC
+  when the source file carries no `DateTimeOriginal` of its own, so every
+  exported HEIC has a real capture date and Apple Photos never files a scan
+  under its import day. A date the source already carries is never overwritten.
+- `pm recanon` now writes an XMP sidecar (`<canonical-name>.xmp`) beside each
+  renamed file that embeds no capture date, carrying the stem date so Capture
+  One shows the true date. The original file's bytes are left untouched.
+- `pm publish` now imports in batches (`--batch-size`, default 250) with a short
+  pause between them (`--settle`, default 2s), cutting a whole-library push from
+  thousands of per-file `osxphotos` sessions to a handful. It keeps Photos.app
+  running and warm across the run rather than restarting it — `osxphotos` drives
+  Photos over AppleScript, which hangs against a cold, still-loading library.
+- `pm reconcile` re-syncs the index's published state to the live Photos library:
+  it clears the published marker from derivatives whose asset is no longer in
+  Photos (deleted, or never actually kept) so the next publish re-imports them.
+  It refuses an empty manifest and never deletes anything.
+- `pm publish --stage DIR` hardlinks the derivatives it would import into
+  `DIR/YYYY/MM` instead of importing, so a large first-time library can be seeded
+  through Photos' native folder import — which, unlike `osxphotos`, does not
+  degrade past a couple thousand files. It reuses publish's selection (frames
+  already in Photos are associated, not staged) and marks nothing published.
+- `pm link` reconnects the index after a native import: it matches each
+  unpublished derivative to a Photos asset by filename and marks it published, so
+  later publishes skip it. It refuses an empty manifest, never clobbers an
+  existing association, and skips a filename claimed by more than one asset.
+
+### Fixed
+
+- `pm publish` now records a derivative as published only when `osxphotos`
+  reports it actually imported, instead of trusting any uuid in the report — so a
+  file Photos rejects is left unpublished for retry rather than falsely marked.
+
 ## [0.9.2] - 2026-07-03
 
 ### Fixed

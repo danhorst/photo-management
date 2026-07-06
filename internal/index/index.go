@@ -414,6 +414,41 @@ func (i *Index) MarkPublished(sourceHash, photosUUID string) error {
 	return err
 }
 
+// PublishedDerivatives returns the derivatives currently marked published
+// (photos_uuid set), so reconcile can test each recorded uuid against the live
+// Photos library.
+func (i *Index) PublishedDerivatives() ([]Derivative, error) {
+	rows, err := i.db.Query(`
+		SELECT source_hash, stem, source_kind, heic_path, generated_at,
+		       photos_uuid, COALESCE(published_at, 0)
+		FROM derivative WHERE photos_uuid IS NOT NULL ORDER BY stem, heic_path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Derivative
+	for rows.Next() {
+		var d Derivative
+		var gen, pub int64
+		if err := rows.Scan(&d.SourceHash, &d.Stem, &d.SourceKind, &d.HeicPath, &gen, &d.PhotosUUID, &pub); err != nil {
+			return nil, err
+		}
+		d.GeneratedAt = time.Unix(gen, 0)
+		if pub != 0 {
+			d.PublishedAt = time.Unix(pub, 0)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ClearPublished removes the published marker (photos_uuid and published_at)
+// from the derivative row for sourceHash, so the next publish re-imports it.
+func (i *Index) ClearPublished(sourceHash string) error {
+	_, err := i.db.Exec(`UPDATE derivative SET photos_uuid = NULL, published_at = NULL WHERE source_hash = ?`, sourceHash)
+	return err
+}
+
 const putManifestSQL = `INSERT INTO photos_manifest(uuid, original_filename, capture_time, catalog_key, last_synced)
 	VALUES(?, ?, ?, ?, ?)
 	ON CONFLICT(uuid) DO UPDATE SET

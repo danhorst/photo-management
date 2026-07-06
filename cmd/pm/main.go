@@ -39,6 +39,8 @@ Usage:
   pm <source> [flags]   Import media from a card or queue directory
   pm export [flags]     Generate presentation HEICs into Export/
   pm publish [flags]    Import exported HEICs into Apple Photos
+  pm reconcile [flags]  Clear published state for assets no longer in Photos
+  pm link [flags]       Link natively-imported Photos assets back into the index by filename
   pm pull [flags]       Pull iPhone photos from Apple Photos into the archive
   pm recanon [flags]    Rename non-canonical archive files to a reduced-precision name
   pm index [flags]      Build/refresh the content-hash index
@@ -64,8 +66,11 @@ Flags:
   -L, --library DIR   Photo library root (overrides config and default)
       --db FILE       Index database path (overrides config and default)
       --debug         Print a detailed activity log
-      --dry-run       Import/export/publish/pull/recanon: report actions without writing anything
+      --dry-run       Import/export/publish/pull/recanon/reconcile/link: report actions without writing anything
       --since DATE    Export/pull: limit to frames captured on/after YYYY-MM-DD
+      --batch-size N  Publish: files per osxphotos import call (0 = one batch)
+      --settle DUR    Publish: pause between batches so Photos drains (e.g. 2s)
+      --stage DIR     Publish: hardlink derivatives into DIR/YYYY/MM for native import instead of importing
       --match SUBSTR  Recanon: limit to frames whose stem contains SUBSTR
       --date DATE     Recanon: stamp day precision YYYY-MM-DD instead of month-from-folder
       --photos-library PATH
@@ -87,6 +92,10 @@ func main() {
 		err = cmdExport(args[1:])
 	case "publish":
 		err = cmdPublish(args[1:])
+	case "reconcile":
+		err = cmdReconcile(args[1:])
+	case "link":
+		err = cmdLink(args[1:])
 	case "pull":
 		err = cmdPull(args[1:])
 	case "recanon":

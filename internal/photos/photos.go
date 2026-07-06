@@ -34,10 +34,22 @@ func (a Asset) Device() string {
 	return strings.TrimSpace(a.CameraMake + " " + a.CameraModel)
 }
 
-// Library abstracts the osxphotos shell-outs so publish logic is testable.
+// Library abstracts the osxphotos shell-outs so publish logic is testable. Each
+// query fetches only the fields its caller needs: Manifest for publish's
+// natural-key match, ManifestNames for link, LiveUUIDs for reconcile.
 type Library interface {
 	Manifest() ([]Asset, error)
-	Import(path string) (uuid string, err error)
+	ManifestNames() ([]Asset, error)
+	LiveUUIDs() ([]string, error)
+	ImportBatch(paths []string) (map[string]ImportResult, error)
+}
+
+// ImportResult is the per-file outcome of an import batch: a new asset uuid on
+// success, or Err when Photos rejected the file (or it was absent from the
+// report).
+type ImportResult struct {
+	UUID string
+	Err  error
 }
 
 // stemLayout is the timestamp prefix of a canonical archive stem, the natural
@@ -149,7 +161,9 @@ func exitErrOutput(err error) []byte {
 	return nil
 }
 
-type manifestEntry struct {
+// pullEntry is the full per-asset record PullManifest parses: enough for pull to
+// apply the device allowlist (camera make/model), the movie filter, and --since.
+type pullEntry struct {
 	UUID             string `json:"uuid"`
 	OriginalFilename string `json:"original_filename"`
 	Date             string `json:"date"`
@@ -160,14 +174,16 @@ type manifestEntry struct {
 	} `json:"exif_info"`
 }
 
-// Manifest queries every asset in the Photos library.
-func (o OSXPhotos) Manifest() ([]Asset, error) {
+// PullManifest queries every asset with the fields pull needs. Unlike the other
+// queries it cannot be field-limited: the camera make/model it filters on live
+// in exif_info, which no cheap template exposes, so it pays the full --json cost.
+func (o OSXPhotos) PullManifest() ([]Asset, error) {
 	args := append([]string{"query", "--json", "--mute"}, o.libraryArgs()...)
 	out, err := exec.Command("osxphotos", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("osxphotos query: %w%s", err, fullDiskAccessHint(exitErrOutput(err)))
 	}
-	var entries []manifestEntry
+	var entries []pullEntry
 	if err := json.Unmarshal(out, &entries); err != nil {
 		return nil, fmt.Errorf("parsing osxphotos manifest: %w", err)
 	}
@@ -185,39 +201,169 @@ func (o OSXPhotos) Manifest() ([]Asset, error) {
 	return assets, nil
 }
 
-// Import pushes one file into Apple Photos as a flat import (no album) and
-// returns the new asset's uuid from the import report. Unlike query/export,
-// osxphotos import does not honor --library as a target selector — it always
-// writes into whichever library Photos.app currently has open; --library is
-// passed here only as the fallback hint osxphotos itself documents, not a
-// safety guarantee. Callers pinning PhotosLibrary must ensure Photos.app is
-// already switched to it before calling Import.
-func (o OSXPhotos) Import(path string) (string, error) {
+// strftimeLayout / fieldDateLayout are the same wall-clock format either side of
+// the osxphotos {created.strftime,…} field: osxphotos renders capture time in it
+// (zone-free local wall-clock), and Manifest parses it back with time.Parse.
+// Wall-clock matches what the natural-key matcher and canonical stems compare on.
+const (
+	strftimeLayout  = "%Y-%m-%dT%H:%M:%S"
+	fieldDateLayout = "2006-01-02T15:04:05"
+)
+
+// fieldEntry is the record the field-limited queries parse; each populates only
+// the fields it requests via --field, the rest stay zero.
+type fieldEntry struct {
+	UUID             string `json:"uuid"`
+	OriginalFilename string `json:"original_filename"`
+	CaptureTime      string `json:"capture_time"`
+}
+
+// queryFields runs a field-limited osxphotos query. A full --json manifest
+// computes every field (exif, albums, persons) per photo, which is prohibitively
+// slow and memory-heavy once the library holds tens of thousands of assets;
+// requesting only named fields skips that work.
+func (o OSXPhotos) queryFields(fields ...string) ([]fieldEntry, error) {
+	args := append([]string{"query", "--json", "--mute"}, fields...)
+	args = append(args, o.libraryArgs()...)
+	out, err := exec.Command("osxphotos", args...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("osxphotos query: %w%s", err, fullDiskAccessHint(exitErrOutput(err)))
+	}
+	var entries []fieldEntry
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return nil, fmt.Errorf("parsing osxphotos manifest: %w", err)
+	}
+	return entries, nil
+}
+
+// Manifest queries the fields publish matches on: uuid, original filename, and
+// capture time. Field-limited (see queryFields).
+func (o OSXPhotos) Manifest() ([]Asset, error) {
+	entries, err := o.queryFields(
+		"--field", "uuid", "{uuid}",
+		"--field", "original_filename", "{original_name}",
+		"--field", "capture_time", "{created.strftime,"+strftimeLayout+"}",
+	)
+	if err != nil {
+		return nil, err
+	}
+	assets := make([]Asset, 0, len(entries))
+	for _, e := range entries {
+		a := Asset{UUID: e.UUID, OriginalFilename: e.OriginalFilename}
+		if t, err := time.ParseInLocation(fieldDateLayout, e.CaptureTime, time.Local); err == nil {
+			a.CaptureTime = t
+		}
+		assets = append(assets, a)
+	}
+	return assets, nil
+}
+
+// ManifestNames queries only uuid and original filename — all pm link needs to
+// match by name. Field-limited (see queryFields).
+func (o OSXPhotos) ManifestNames() ([]Asset, error) {
+	entries, err := o.queryFields(
+		"--field", "uuid", "{uuid}",
+		"--field", "original_filename", "{original_name}",
+	)
+	if err != nil {
+		return nil, err
+	}
+	assets := make([]Asset, 0, len(entries))
+	for _, e := range entries {
+		assets = append(assets, Asset{UUID: e.UUID, OriginalFilename: e.OriginalFilename})
+	}
+	return assets, nil
+}
+
+// LiveUUIDs queries just the uuid of every asset — all reconcile and the
+// active-library check need. Field-limited (see queryFields).
+func (o OSXPhotos) LiveUUIDs() ([]string, error) {
+	entries, err := o.queryFields("--field", "uuid", "{uuid}")
+	if err != nil {
+		return nil, err
+	}
+	uuids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		uuids = append(uuids, e.UUID)
+	}
+	return uuids, nil
+}
+
+// importReportRecord is the subset of an osxphotos import --report JSON record
+// we rely on: filename is the source basename, imported/error the outcome, and
+// uuid the new asset id (set only on a genuine import).
+type importReportRecord struct {
+	Filename string `json:"filename"`
+	Imported bool   `json:"imported"`
+	Error    bool   `json:"error"`
+	UUID     string `json:"uuid"`
+}
+
+// ImportBatch imports paths into Apple Photos in a single osxphotos call and
+// returns a per-path result keyed by the input path. A path succeeds only when
+// the report marks it imported with no error and a uuid; every other path
+// (rejected by Photos, or absent from the report) carries an Err, so the caller
+// leaves it unpublished for a later retry. A non-nil top-level error means
+// osxphotos could not run at all.
+//
+// Unlike query/export, osxphotos import does not honor --library as a target
+// selector — it always writes into whichever library Photos.app currently has
+// open; --library is only the fallback hint osxphotos documents. Callers pinning
+// PhotosLibrary must ensure Photos.app already has it open.
+func (o OSXPhotos) ImportBatch(paths []string) (map[string]ImportResult, error) {
+	if len(paths) == 0 {
+		return map[string]ImportResult{}, nil
+	}
 	report, err := os.CreateTemp("", "photo-management-import-*.json")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	report.Close()
 	defer os.Remove(report.Name())
 
-	args := append([]string{"import", path, "--report", report.Name(), "--no-progress"}, o.libraryArgs()...)
+	args := append([]string{"import"}, paths...)
+	args = append(args, "--report", report.Name(), "--no-progress")
+	args = append(args, o.libraryArgs()...)
 	out, err := exec.Command("osxphotos", args...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("osxphotos import %s: %v: %s%s%s", path, err, lastLine(out), fullDiskAccessHint(out), automationHint(out))
-	}
 
-	data, err := os.ReadFile(report.Name())
-	if err != nil {
-		return "", err
-	}
-	var rows []map[string]any
-	if err := json.Unmarshal(data, &rows); err != nil {
-		return "", fmt.Errorf("parsing import report for %s: %w", path, err)
-	}
-	for _, r := range rows {
-		if u, _ := r["uuid"].(string); u != "" {
-			return u, nil
+	// osxphotos exits non-zero when some files fail but still writes a report
+	// for the rest, so only a missing/empty report is a hard failure.
+	data, readErr := os.ReadFile(report.Name())
+	if len(data) == 0 {
+		if err != nil {
+			return nil, fmt.Errorf("osxphotos import: %v: %s%s%s", err, lastLine(out), fullDiskAccessHint(out), automationHint(out))
+		}
+		if readErr != nil {
+			return nil, readErr
 		}
 	}
-	return "", fmt.Errorf("osxphotos import %s: no uuid in report", path)
+	return resolveImportReport(data, paths)
+}
+
+// resolveImportReport maps each input path to its outcome from the osxphotos
+// import report bytes. A path succeeds only when its record is imported, not
+// errored, and carries a uuid; a record marked error, or a path absent from the
+// report, is a failure the caller leaves unpublished. Records match input paths
+// by basename (unique within a batch).
+func resolveImportReport(data []byte, paths []string) (map[string]ImportResult, error) {
+	var records []importReportRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, fmt.Errorf("parsing import report: %w", err)
+	}
+	byBase := make(map[string]importReportRecord, len(records))
+	for _, r := range records {
+		byBase[r.Filename] = r
+	}
+	results := make(map[string]ImportResult, len(paths))
+	for _, p := range paths {
+		switch r, ok := byBase[filepath.Base(p)]; {
+		case !ok:
+			results[p] = ImportResult{Err: fmt.Errorf("osxphotos import %s: not in report", p)}
+		case r.Error || !r.Imported || r.UUID == "":
+			results[p] = ImportResult{Err: fmt.Errorf("osxphotos import %s: Photos did not import it", p)}
+		default:
+			results[p] = ImportResult{UUID: r.UUID}
+		}
+	}
+	return results, nil
 }

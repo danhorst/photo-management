@@ -15,7 +15,7 @@ import (
 
 // puller is the slice of osxphotos that pull needs.
 type puller interface {
-	Manifest() ([]photos.Asset, error)
+	PullManifest() ([]photos.Asset, error)
 	Export(dir string, uuids []string) error
 }
 
@@ -72,7 +72,7 @@ func pull(cfg config.Config, idx *index.Index, lib puller, logf func(string, ...
 	if showProgress {
 		fmt.Fprintln(os.Stderr, "querying the Photos library manifest…")
 	}
-	assets, err := lib.Manifest()
+	assets, err := lib.PullManifest()
 	if err != nil {
 		return err
 	}
