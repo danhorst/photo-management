@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-06
+
 ### Performance
 
 - The Photos manifest queries now request only the fields each command uses, via
@@ -15,6 +17,14 @@
 
 ### Added
 
+- `pm sync` chains `export` and `publish` behind one command, resolving its
+  `--since` cutoff from a watermark stored in the index instead of a hand-typed
+  date. The first run does a full scan; every clean run after that advances the
+  watermark to today, so the next `sync` only considers what's new. A run with
+  any failures leaves the watermark in place so the next `sync` retries it.
+  `--since` still overrides the watermark for one run, and `--set-since` seeds
+  the watermark directly — for a library that's already been brought in sync by
+  hand — without running export or publish.
 - `pm export` now stamps a frame's canonical stem date onto its derivative HEIC
   when the source file carries no `DateTimeOriginal` of its own, so every
   exported HEIC has a real capture date and Apple Photos never files a scan
@@ -219,7 +229,8 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/danhorst/photo-management/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/danhorst/photo-management/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/danhorst/photo-management/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/danhorst/photo-management/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/danhorst/photo-management/compare/v0.8.1...v0.9.0
