@@ -4,11 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/dbh/photo-management/internal/config"
+	"github.com/dbh/photo-management/internal/exif"
 	"github.com/dbh/photo-management/internal/export"
 	"github.com/dbh/photo-management/internal/index"
 	"github.com/dbh/photo-management/internal/organize"
@@ -82,12 +84,28 @@ func cmdRecanon(args []string) error {
 		}
 		newStem := organize.Stem(t, prec, f.Stem)
 
+		// Files with no embedded capture date get an XMP sidecar carrying the
+		// stem date, so Capture One shows the true date without our rewriting
+		// the original's bytes. A read failure means we can't tell which files
+		// are dated, so skip sidecars rather than risk overriding a real date.
+		dated, dErr := exif.Dates(files)
+		if dErr != nil {
+			logf("skip sidecars for %s: reading dates: %v", f.Stem, dErr)
+		}
+		date := t.Format(sidecarDate)
+
 		for _, p := range files {
 			base := filepath.Base(p)
 			newBase := newStem + base[len(f.Stem):]
 			newPath := filepath.Join(filepath.Dir(p), newBase)
+			_, hasDate := dated[p]
+			sidecar := dErr == nil && !hasDate
 			if *dryRun {
-				fmt.Printf("%s -> %s\n", relTo(cfg.Library, p), newBase)
+				note := ""
+				if sidecar {
+					note = " (+.xmp)"
+				}
+				fmt.Printf("%s -> %s%s\n", relTo(cfg.Library, p), newBase, note)
 				continue
 			}
 			if _, err := os.Stat(newPath); err == nil {
@@ -102,6 +120,12 @@ func cmdRecanon(args []string) error {
 				return err
 			}
 			logf("renamed %s -> %s", p, newPath)
+			if sidecar {
+				if err := writeSidecar(newPath, date); err != nil {
+					return err
+				}
+				logf("wrote sidecar for %s", newPath)
+			}
 		}
 		renamed++
 	}
@@ -117,6 +141,25 @@ func cmdRecanon(args []string) error {
 	fmt.Println(".")
 	if !*dryRun && renamed > 0 {
 		fmt.Println("Run `pm export` to generate their derivatives.")
+	}
+	return nil
+}
+
+// sidecarDate is exiftool's date layout for the XMP sidecar capture-date tags.
+const sidecarDate = "2006:01:02 15:04:05"
+
+// writeSidecar writes an XMP sidecar beside file carrying date as the capture
+// date, in the three namespaces a DAM reads. The original file is not touched.
+func writeSidecar(file, date string) error {
+	xmp := strings.TrimSuffix(file, filepath.Ext(file)) + ".xmp"
+	out, err := exec.Command("exiftool", "-q",
+		"-XMP-exif:DateTimeOriginal="+date,
+		"-XMP-photoshop:DateCreated="+date,
+		"-XMP-xmp:CreateDate="+date,
+		"-o", xmp, file,
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("writing sidecar %s: %v: %s", xmp, err, out)
 	}
 	return nil
 }

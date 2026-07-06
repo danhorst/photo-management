@@ -8,7 +8,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	"github.com/dbh/photo-management/internal/organize"
 )
+
+// exiftoolDate is exiftool's date layout for -DateTimeOriginal/-CreateDate.
+const exiftoolDate = "2006:01:02 15:04:05"
 
 const (
 	// DefaultLongEdge is the derivative's long-edge pixel size when the config
@@ -134,6 +139,23 @@ func (g *Generator) Generate(src Source, stem, versionID, dst string) error {
 	if err != nil {
 		os.Remove(dst)
 		return fmt.Errorf("exiftool %s: %v: %s", dst, err, out)
+	}
+
+	// Fallback: when the source carried no capture date, stamp the frame's
+	// canonical stem date so the derivative is never undated (which would make
+	// Apple Photos file it under the import day). -wm cg writes only when the
+	// tag is absent, so a real date copied above is never overwritten.
+	if t, _, _, ok := organize.ParseStem(stem); ok {
+		d := t.Format(exiftoolDate)
+		out, err = exec.Command("exiftool",
+			"-overwrite_original", "-q", "-wm", "cg",
+			"-DateTimeOriginal="+d, "-CreateDate="+d,
+			dst,
+		).CombinedOutput()
+		if err != nil {
+			os.Remove(dst)
+			return fmt.Errorf("exiftool date fallback %s: %v: %s", dst, err, out)
+		}
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -96,5 +97,61 @@ func TestGenerateFallbackRendersMaster(t *testing.T) {
 	}
 	if fi, err := os.Stat(dst); err != nil || fi.Size() == 0 {
 		t.Fatalf("no HEIC produced: stat=%v", err)
+	}
+}
+
+// readDate returns a file's DateTimeOriginal, or "" when it carries none.
+func readDate(t *testing.T, path string) string {
+	t.Helper()
+	out, err := exec.Command("exiftool", "-s3", "-d", "%Y:%m:%d %H:%M:%S",
+		"-DateTimeOriginal", path).Output()
+	if err != nil {
+		t.Fatalf("read date %s: %v", path, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestGenerateStampsStemDateWhenSourceUndated(t *testing.T) {
+	requireBinary(t, "exiftool")
+	requireBinary(t, "sips")
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "scan.jpg") // a plain JPEG carries no capture date
+	writeJPEG(t, src)
+	dst := filepath.Join(dir, "out.heic")
+
+	g := &Generator{LongEdge: DefaultLongEdge, Quality: DefaultQuality}
+	defer g.Close()
+
+	if err := g.Generate(Source{Kind: "jpeg", Path: src}, "2005-06-15--13-45-30-scan", "v1", dst); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got := readDate(t, dst); got != "2005:06:15 13:45:30" {
+		t.Fatalf("DateTimeOriginal = %q, want the stem date 2005:06:15 13:45:30", got)
+	}
+}
+
+func TestGeneratePreservesSourceDate(t *testing.T) {
+	requireBinary(t, "exiftool")
+	requireBinary(t, "sips")
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "cam.jpg")
+	writeJPEG(t, src)
+	if out, err := exec.Command("exiftool", "-q", "-overwrite_original",
+		"-DateTimeOriginal=2018:03:03 09:09:09", src).CombinedOutput(); err != nil {
+		t.Fatalf("stamp source: %v: %s", err, out)
+	}
+	dst := filepath.Join(dir, "out.heic")
+
+	g := &Generator{LongEdge: DefaultLongEdge, Quality: DefaultQuality}
+	defer g.Close()
+
+	// The stem date differs from the source's real date; the fallback must not clobber it.
+	if err := g.Generate(Source{Kind: "jpeg", Path: src}, "2005-06-15--13-45-30-cam", "v1", dst); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got := readDate(t, dst); got != "2018:03:03 09:09:09" {
+		t.Fatalf("DateTimeOriginal = %q, want the source date 2018:03:03 09:09:09 preserved", got)
 	}
 }
