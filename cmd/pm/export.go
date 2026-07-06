@@ -43,6 +43,21 @@ func cmdExport(args []string) error {
 	if err != nil {
 		return err
 	}
+	idx, err := index.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	showProgress := !*debug && isatty.IsTerminal(os.Stderr.Fd())
+	_, _, _, err = runExport(idx, cfg, sinceDate, *dryRun, debugLogger(*debug), showProgress)
+	return err
+}
+
+// runExport generates presentation HEICs for archive frames captured on/after
+// sinceDate (or every frame, if zero) that don't already have a derivative,
+// returning counts of what it did.
+func runExport(idx *index.Index, cfg config.Config, sinceDate time.Time, dryRun bool, logf func(string, ...any), showProgress bool) (generated, skipped, failed int, err error) {
 	longEdge, quality := cfg.ExportLongEdge, cfg.ExportQuality
 	if longEdge == 0 {
 		longEdge = export.DefaultLongEdge
@@ -50,18 +65,12 @@ func cmdExport(args []string) error {
 	if quality == 0 {
 		quality = export.DefaultQuality
 	}
-	idx, err := index.Open(cfg.Database)
-	if err != nil {
-		return err
-	}
-	defer idx.Close()
 
-	logf := debugLogger(*debug)
 	start := time.Now()
 
 	paths, err := collectArchive(cfg.Library)
 	if err != nil {
-		return err
+		return 0, 0, 0, err
 	}
 	frames := export.Group(paths)
 	logf("found %d frame(s) in %d archive file(s)", len(frames), len(paths))
@@ -113,9 +122,8 @@ func cmdExport(args []string) error {
 		err         error
 	}
 
-	showScan := !*debug && isatty.IsTerminal(os.Stderr.Fd())
 	var scanBar *progressbar.ProgressBar
-	if showScan && len(jobs) > 0 {
+	if showProgress && len(jobs) > 0 {
 		scanBar = progressbar.Default(int64(len(jobs)), "scanning")
 	}
 
@@ -162,7 +170,6 @@ func cmdExport(args []string) error {
 	}
 	var toGenerate []genJob
 	var fresh []freshFile
-	var generated, skipped, failed int
 	for r := range scanResCh {
 		if scanBar != nil {
 			scanBar.Add(1)
@@ -175,9 +182,9 @@ func cmdExport(args []string) error {
 		if r.fresh {
 			fresh = append(fresh, freshFile{r.w.src.Path, r.size, r.mtime, r.hash})
 		}
-		has, err := idx.HasDerivative(r.hash)
-		if err != nil {
-			return err
+		has, hasErr := idx.HasDerivative(r.hash)
+		if hasErr != nil {
+			return generated, skipped, failed, hasErr
 		}
 		if has {
 			skipped++
@@ -185,7 +192,7 @@ func cmdExport(args []string) error {
 			continue
 		}
 		dst := export.DestPath(cfg.Library, r.w.frame, r.w.src)
-		if *dryRun {
+		if dryRun {
 			generated++
 			logf("would export %s -> %s", r.w.src.Path, dst)
 			continue
@@ -201,19 +208,19 @@ func cmdExport(args []string) error {
 	// the read. Safe now: the scan workers have finished, so this write
 	// transaction holds the single connection uncontended. Skipped under
 	// --dry-run, which writes nothing.
-	if !*dryRun && len(fresh) > 0 {
+	if !dryRun && len(fresh) > 0 {
 		fb, err := idx.Begin()
 		if err != nil {
-			return err
+			return generated, skipped, failed, err
 		}
 		for _, f := range fresh {
 			if err := fb.Put(f.path, f.size, f.mtime, f.hash); err != nil {
 				fb.Rollback()
-				return err
+				return generated, skipped, failed, err
 			}
 		}
 		if err := fb.Commit(); err != nil {
-			return err
+			return generated, skipped, failed, err
 		}
 	}
 
@@ -222,13 +229,13 @@ func cmdExport(args []string) error {
 	// batch on the main goroutine only; workers touch no shared state besides
 	// the Generator (safe for concurrent Generate calls).
 	var exportBar *progressbar.ProgressBar
-	if !*dryRun && !*debug && isatty.IsTerminal(os.Stderr.Fd()) && len(toGenerate) > 0 {
+	if !dryRun && showProgress && len(toGenerate) > 0 {
 		exportBar = progressbar.Default(int64(len(toGenerate)), "exporting")
 	}
 	if len(toGenerate) > 0 {
 		batch, err := idx.BeginDerivatives()
 		if err != nil {
-			return err
+			return generated, skipped, failed, err
 		}
 		committed := false
 		defer func() {
@@ -273,13 +280,13 @@ func cmdExport(args []string) error {
 				continue
 			}
 			if err := batch.Put(r.gj.h, r.gj.w.frame.Stem, r.gj.w.src.Kind, r.gj.dst); err != nil {
-				return err
+				return generated, skipped, failed, err
 			}
 			generated++
 			logf("exported %s -> %s", r.gj.w.src.Path, r.gj.dst)
 		}
 		if err := batch.Commit(); err != nil {
-			return err
+			return generated, skipped, failed, err
 		}
 		committed = true
 	}
@@ -289,7 +296,7 @@ func cmdExport(args []string) error {
 	}
 
 	verb := "Exported"
-	if *dryRun {
+	if dryRun {
 		verb = "Would export"
 	}
 	fmt.Printf("%s %d HEIC(s) in %s; skipped %d already generated", verb, generated, time.Since(start).Round(time.Millisecond), skipped)
@@ -297,7 +304,7 @@ func cmdExport(args []string) error {
 		fmt.Printf("; %d error(s)", failed)
 	}
 	fmt.Println(".")
-	return nil
+	return generated, skipped, failed, nil
 }
 
 var yearDir = regexp.MustCompile(`^\d{4}$`)

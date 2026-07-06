@@ -76,7 +76,7 @@ func TestPublishTwoDedupLayers(t *testing.T) {
 		}
 	}
 
-	if err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false); err != nil {
+	if _, err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,7 +100,7 @@ func TestPublishTwoDedupLayers(t *testing.T) {
 
 	// Layer 1: a re-run selects nothing and imports nothing.
 	lib.imported = nil
-	if err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false); err != nil {
+	if _, err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 0 {
@@ -128,7 +128,7 @@ func TestPublishSinceFiltersByCaptureDate(t *testing.T) {
 
 	lib := &fakeLibrary{}
 	since := time.Date(2026, 6, 1, 0, 0, 0, 0, time.Local)
-	if err := publish(idx, lib, discard, false, since, 0, 0, "", false); err != nil {
+	if _, err := publish(idx, lib, discard, false, since, 0, 0, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 1 || lib.imported[0] != "/Export/2026/06/"+late+".heic" {
@@ -151,8 +151,12 @@ func TestPublishRejectedFileIsNonFatal(t *testing.T) {
 		t.Fatal(err)
 	}
 	lib := &fakeLibrary{rejects: map[string]bool{"/a.heic": true}}
-	if err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false); err != nil {
+	failed, err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false)
+	if err != nil {
 		t.Fatalf("a rejected file must not abort the run: %v", err)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, want 1 (the rejected file)", failed)
 	}
 	un, err := idx.UnpublishedDerivatives()
 	if err != nil {
@@ -179,7 +183,7 @@ func TestPublishWholeBatchFailureAborts(t *testing.T) {
 	// A top-level ImportBatch failure means osxphotos couldn't run — abort so
 	// the user fixes the environment and re-runs (publish is resumable).
 	lib := &fakeLibrary{importErr: errors.New("osxphotos: command not found")}
-	if err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false); err == nil {
+	if _, err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", false); err == nil {
 		t.Fatal("a whole-batch osxphotos failure must abort the run")
 	}
 }
@@ -198,7 +202,7 @@ func TestPublishBatches(t *testing.T) {
 		}
 	}
 	lib := &fakeLibrary{}
-	if err := publish(idx, lib, discard, false, time.Time{}, 2, 0, "", false); err != nil {
+	if _, err := publish(idx, lib, discard, false, time.Time{}, 2, 0, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 5 {
@@ -253,7 +257,7 @@ func TestPublishStageHardlinks(t *testing.T) {
 	}
 
 	lib := &fakeLibrary{} // empty manifest, no natural-key associations
-	if err := publish(idx, lib, discard, false, time.Time{}, 0, 0, stageDir, false); err != nil {
+	if _, err := publish(idx, lib, discard, false, time.Time{}, 0, 0, stageDir, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -294,7 +298,7 @@ func TestPublishDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	lib := &fakeLibrary{}
-	if err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", true); err != nil {
+	if _, err := publish(idx, lib, discard, false, time.Time{}, 0, 0, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if len(lib.imported) != 0 {

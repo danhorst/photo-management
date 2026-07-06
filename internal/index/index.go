@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS photos_manifest (
 );
 CREATE INDEX IF NOT EXISTS idx_manifest_natural
 	ON photos_manifest(capture_time, original_filename);
+
+CREATE TABLE IF NOT EXISTS sync_state (
+	id         INTEGER PRIMARY KEY CHECK (id = 1),
+	since_date TEXT NOT NULL
+);
 `
 
 const insertSQL = `INSERT INTO files(path, size, mtime, blake3, hashed_at) VALUES(?, ?, ?, ?, ?)
@@ -479,6 +484,34 @@ func (i *Index) ManifestLookup(originalName string, captureTime time.Time) (uuid
 		return "", false, err
 	}
 	return uuid, true, nil
+}
+
+// LastSyncSince returns the stored capture-date watermark for `sync`, if any.
+// ok is false when sync has never completed a clean run, meaning the next
+// sync should do a full scan.
+func (i *Index) LastSyncSince() (t time.Time, ok bool, err error) {
+	var s string
+	err = i.db.QueryRow(`SELECT since_date FROM sync_state WHERE id = 1`).Scan(&s)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	t, err = time.ParseInLocation("2006-01-02", s, time.Local)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return t, true, nil
+}
+
+// SetSyncSince upserts the stored capture-date watermark for `sync`.
+func (i *Index) SetSyncSince(t time.Time) error {
+	_, err := i.db.Exec(`
+		INSERT INTO sync_state(id, since_date) VALUES(1, ?)
+		ON CONFLICT(id) DO UPDATE SET since_date=excluded.since_date`,
+		t.Format("2006-01-02"))
+	return err
 }
 
 // Stats returns the number of indexed files and the most recent hash time.

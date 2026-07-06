@@ -59,7 +59,8 @@ func cmdPublish(args []string) error {
 		}
 	}
 
-	return publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), showProgress, sinceDate, *batchSize, *settle, *stage, *dryRun)
+	_, err = publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), showProgress, sinceDate, *batchSize, *settle, *stage, *dryRun)
+	return err
 }
 
 // defaultBatchSize is how many files publish sends per osxphotos import call.
@@ -110,7 +111,7 @@ func verifyActiveLibrary(want string) error {
 // base derivative whose frame already exists in Photos by natural key,
 // recording the association. Edits always import as new assets; nothing is
 // ever deleted or replaced.
-func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), showProgress bool, sinceDate time.Time, batchSize int, settle time.Duration, stageDir string, dryRun bool) error {
+func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), showProgress bool, sinceDate time.Time, batchSize int, settle time.Duration, stageDir string, dryRun bool) (failed int, err error) {
 	start := time.Now()
 
 	// Refresh the manifest cache and build the natural-key matcher. Under
@@ -120,12 +121,12 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 	}
 	assets, err := lib.Manifest()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !dryRun {
 		for _, a := range assets {
 			if err := idx.PutManifest(a.UUID, a.OriginalFilename, a.CaptureTime, a.CatalogKey); err != nil {
-				return err
+				return 0, err
 			}
 		}
 	}
@@ -134,10 +135,10 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 
 	pending, err := idx.UnpublishedDerivatives()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	var imported, associated, failed int
+	var imported, associated int
 	var firstErr error
 
 	// Phase 1: drop --since skips and settle Layer-2 associations (fast index
@@ -163,7 +164,7 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 				}
 				logf("associate %s with existing asset %s", d.HeicPath, uuid)
 				if err := idx.MarkPublished(d.SourceHash, uuid); err != nil {
-					return err
+					return failed, err
 				}
 				continue
 			}
@@ -204,13 +205,13 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 				continue
 			}
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-				return err
+				return failed, err
 			}
 			if err := os.Link(d.HeicPath, dst); err != nil {
 				if errors.Is(err, syscall.EXDEV) {
-					return fmt.Errorf("cannot hardlink into %s: --stage must be on the same volume as the library — choose a directory under the library volume: %w", stageDir, err)
+					return failed, fmt.Errorf("cannot hardlink into %s: --stage must be on the same volume as the library — choose a directory under the library volume: %w", stageDir, err)
 				}
-				return fmt.Errorf("hardlink %s -> %s: %w", d.HeicPath, dst, err)
+				return failed, fmt.Errorf("hardlink %s -> %s: %w", d.HeicPath, dst, err)
 			}
 			imported++
 			logf("staged %s -> %s", d.HeicPath, dst)
@@ -240,7 +241,7 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 			}
 			results, err := lib.ImportBatch(paths)
 			if err != nil {
-				return err // osxphotos couldn't run at all
+				return failed, err // osxphotos couldn't run at all
 			}
 			for _, p := range paths {
 				if bar != nil {
@@ -256,7 +257,7 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 					continue
 				}
 				if err := idx.MarkPublished(byPath[p].SourceHash, r.UUID); err != nil {
-					return err
+					return failed, err
 				}
 				imported++
 				logf("imported %s as %s", p, r.UUID)
@@ -284,7 +285,7 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 		if !dryRun && imported > 0 {
 			fmt.Println("Import them into Photos, then run `pm link`.")
 		}
-		return nil
+		return failed, nil
 	}
 
 	verb := "Published"
@@ -299,7 +300,7 @@ func publish(idx *index.Index, lib photos.Library, logf func(string, ...any), sh
 	if firstErr != nil {
 		fmt.Fprintf(os.Stderr, "first error: %v\n", firstErr)
 	}
-	return nil
+	return failed, nil
 }
 
 // stageTarget maps a derivative's Export HEIC path to its hardlink destination

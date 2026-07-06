@@ -357,3 +357,38 @@ func TestMarkPublishedAndUnpublished(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncSinceRoundTrip(t *testing.T) {
+	idx := open(t)
+
+	if _, ok, err := idx.LastSyncSince(); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Error("LastSyncSince should report not-ok before any sync has run")
+	}
+
+	first := time.Date(2026, 7, 1, 0, 0, 0, 0, time.Local)
+	if err := idx.SetSyncSince(first); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := idx.LastSyncSince()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !got.Equal(first) {
+		t.Errorf("LastSyncSince = %v, %v, want %v, true", got, ok, first)
+	}
+
+	// A repeat call upserts in place rather than erroring on the singleton row.
+	second := time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local)
+	if err := idx.SetSyncSince(second); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err = idx.LastSyncSince()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !got.Equal(second) {
+		t.Errorf("LastSyncSince after second set = %v, %v, want %v, true", got, ok, second)
+	}
+}

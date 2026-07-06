@@ -39,6 +39,7 @@ Usage:
   pm <source> [flags]   Import media from a card or queue directory
   pm export [flags]     Generate presentation HEICs into Export/
   pm publish [flags]    Import exported HEICs into Apple Photos
+  pm sync [flags]       Export new derivatives, then publish them, using a stored watermark
   pm reconcile [flags]  Clear published state for assets no longer in Photos
   pm link [flags]       Link natively-imported Photos assets back into the index by filename
   pm pull [flags]       Pull iPhone photos from Apple Photos into the archive
@@ -66,15 +67,19 @@ Flags:
   -L, --library DIR   Photo library root (overrides config and default)
       --db FILE       Index database path (overrides config and default)
       --debug         Print a detailed activity log
-      --dry-run       Import/export/publish/pull/recanon/reconcile/link: report actions without writing anything
-      --since DATE    Export/pull: limit to frames captured on/after YYYY-MM-DD
-      --batch-size N  Publish: files per osxphotos import call (0 = one batch)
-      --settle DUR    Publish: pause between batches so Photos drains (e.g. 2s)
+      --dry-run       Import/export/publish/sync/pull/recanon/reconcile/link: report actions without writing anything
+      --since DATE    Export/publish/pull: limit to frames captured on/after YYYY-MM-DD
+                      Sync: override the stored watermark for this run only
+      --set-since DATE
+                      Sync: set the stored watermark directly (YYYY-MM-DD)
+                      without running export or publish, then exit
+      --batch-size N  Publish/sync: files per osxphotos import call (0 = one batch)
+      --settle DUR    Publish/sync: pause between batches so Photos drains (e.g. 2s)
       --stage DIR     Publish: hardlink derivatives into DIR/YYYY/MM for native import instead of importing
       --match SUBSTR  Recanon: limit to frames whose stem contains SUBSTR
       --date DATE     Recanon: stamp day precision YYYY-MM-DD instead of month-from-folder
       --photos-library PATH
-                      Publish/pull: target this Photos library instead of
+                      Publish/sync/pull: target this Photos library instead of
                       whatever's open (see README for the import caveat)
 `
 
@@ -92,6 +97,8 @@ func main() {
 		err = cmdExport(args[1:])
 	case "publish":
 		err = cmdPublish(args[1:])
+	case "sync":
+		err = cmdSync(args[1:])
 	case "reconcile":
 		err = cmdReconcile(args[1:])
 	case "link":

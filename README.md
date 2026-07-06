@@ -41,6 +41,7 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 - `pm <source>` — import from a directory. Flags: `--dry-run`, `--debug`.
 - `pm export` — generate presentation HEICs into `Export/` (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
 - `pm publish` — import exported HEICs into Apple Photos (see below). Flags: `--dry-run`, `--debug`, `--photos-library PATH`, `--batch-size N`, `--settle DUR`, `--stage DIR`.
+- `pm sync` — export new derivatives, then publish them, using a stored watermark (see below). Flags: `--dry-run`, `--debug`, `--since YYYY-MM-DD`, `--set-since YYYY-MM-DD`, `--photos-library PATH`, `--batch-size N`, `--settle DUR`.
 - `pm link` — link natively-imported Photos assets back into the index by filename (see below). Flags: `--dry-run`, `--debug`, `--photos-library PATH`.
 - `pm pull` — pull iPhone photos from Apple Photos into the archive (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`, `--photos-library PATH`.
 - `pm index` — build or refresh the content-hash index.
@@ -82,6 +83,18 @@ Imports run in batches (`--batch-size`, default 250) with a short pause between 
 `osxphotos` drives Photos over AppleScript, which stays responsive only while Photos is warm, so publish keeps Photos running for the whole run and lets its background queue drain between batches rather than quitting it — a restart would cold-launch the next batch into an unloaded library and hang.
 Leave Photos.app open on the target library before starting.
 A derivative is marked published only when `osxphotos` reports it actually imported; a file Photos rejects stays unpublished, so a re-run retries it.
+
+### Sync
+
+`pm sync` chains `export` and `publish` behind one command, so the recurring going-forward workflow is a single call instead of two.
+
+It resolves its capture-date cutoff automatically: the first `sync` run does a full scan (same as running `export`/`publish` with no `--since`), and every clean run afterward stores today's date as a watermark, so the next `sync` only considers frames captured on or after it — no need to hand-type a matching `--since` on two commands each time.
+`--since YYYY-MM-DD` overrides the watermark for one run without disturbing what's stored.
+
+The watermark only advances when that run's export and publish both finish with zero failures; if anything failed, it's left in place so the next `sync` retries the same window — cheap, since both steps already skip anything already succeeded.
+`--stage` bulk-seeding isn't available through `sync` — use `pm publish --stage` directly for that one-time migration path (see "Seeding a large library" below).
+
+If you've already backfilled the archive by hand (via `export`/`publish`, or the native-seed workflow) and want the first-ever `sync` to skip straight to "what's new" instead of doing a full scan, seed the watermark directly: `pm sync --set-since YYYY-MM-DD` writes the stored watermark without running export or publish at all, then exits.
 
 ### Reconcile
 
