@@ -85,7 +85,6 @@ jobs:
 
           formula_path = "tap/Formula/pm.rb"
           tag      = os.environ["TAG"]
-          bare     = os.environ["BARE"]
           src_sha  = os.environ["SOURCE_SHA"]
 
           text = open(formula_path).read()
@@ -93,11 +92,6 @@ jobs:
           text = re.sub(
             r'url "https://github\.com/danhorst/photo-management/archive/refs/tags/v[^"]+"',
             f'url "https://github.com/danhorst/photo-management/archive/refs/tags/{tag}.tar.gz"',
-            text,
-          )
-          text = re.sub(
-            r'version "[0-9.]+"',
-            f'version "{bare}"',
             text,
           )
           text = re.sub(
